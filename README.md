@@ -1,6 +1,7 @@
-# VMF-to-PBR (Portal 2 PBS Baker)
-
-**A custom map pre-processor and light baker for Source Engine.**
+<div align="center">
+<img src="branding/logo.png" alt="PBS-Baker Logo">
+<h2>A custom map pre-processor and light baker for Source Engine</h2>
+</div>
 
 This tool is designed to bridge the gap between legacy Source Engine lighting (BSP/VRAD) and modern Physically Based Shading (PBS). It parses Valve Map Files (`.vmf`), extracts lighting data, converts legacy attenuation math into physical units, and bakes "Light Clusters" into high-precision LUT textures.
 
