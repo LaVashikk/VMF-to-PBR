@@ -10,6 +10,16 @@ This tool is designed to bridge the gap between legacy Source Engine lighting (B
 > 
 > This tool *does not work out-of-the-box* with Portal 2 or any Source game. It is a specific component of a custom rendering pipeline and generates data structures required by a specific set of **custom HLSL PBR shaders**. Without these shaders, the generated data is useless.
 
+## 📺 Showcase
+
+YT video here soon. I hope
+
+| Vanilla | With PBS |
+|:-----------------------:|:----------------:|
+| <img src="branding/pcap_a1_07_0.jpg" alt="Vanilla 0"> | <img src="branding/pcap_a1_07_pbr_0.jpg" alt="PBS 0"> |
+| <img src="branding/pcap_a1_07_1.jpg" alt="Vanilla 1"> | <img src="branding/pcap_a1_07_pbr_1.jpg" alt="PBS 1"> |
+| <img src="branding/pcap_a1_07_2.jpg" alt="Vanilla 2"> | <img src="branding/pcap_a1_07_pbr_2.jpg" alt="PBS 2"> |
+
 ## 🛠️ How It Works
 
 The tool performs a complex "Baking" process that runs before the standard VBSP/VRAD compilation:
