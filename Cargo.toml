@@ -1,0 +1,14 @@
+[package]
+name = "pbr-lut-gen"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+clap = { version = "4.4", features = ["derive"] }
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+exr = "1.7"
+vmf-forge = "0.4.1"
+regex = "1.10"
+log = "0.4.28"
+simplelog = "0.12.2"
