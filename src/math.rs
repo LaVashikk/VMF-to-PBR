@@ -9,6 +9,12 @@ pub struct AABB {
     pub center: Vec3,
 }
 
+impl Default for AABB {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AABB {
     pub fn new() -> Self {
         Self {

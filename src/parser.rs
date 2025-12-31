@@ -45,12 +45,11 @@ pub fn extract_lights(vmf: &VmfFile) -> anyhow::Result<Vec<LightDef>> {
             if let Some(scale) = ent.get("pbr_intensity_scale") {
                 intensity *= scale.parse::<f32>().unwrap_or(1.0);
             }
-            if let Some(col_str) = ent.get("pbr_color_override") {
-                if col_str != "-1 -1 -1" {
+            if let Some(col_str) = ent.get("pbr_color_override")
+                && col_str != "-1 -1 -1" {
                     let (c, _) = parse_color_intensity(col_str);
                     color = c;
                 }
-            }
 
             // == PHASE 2: PHYSICS & ATTENUATION
             let range_override = ent.get("pbr_range_override").and_then(|s| s.parse::<f32>().ok());
@@ -58,7 +57,7 @@ pub fn extract_lights(vmf: &VmfFile) -> anyhow::Result<Vec<LightDef>> {
             let mut final_pos = origin_vec;
 
             let mut shader_intensity;
-            let mut shader_k;
+            let shader_k;
             let mut range;
             let light_type;
 
@@ -175,16 +174,15 @@ pub fn extract_lights(vmf: &VmfFile) -> anyhow::Result<Vec<LightDef>> {
             }
 
             // == PHASE 3: Final Common Overrides
-            if let Some(r) = range_override {
-                if r > 0.1 { range = r; }
-            }
+            if let Some(r) = range_override
+                && r > 0.1 { range = r; }
             range = range.clamp(64.0, 65000.0);
 
             // Blockers
             let process_blocker = |key: &str| -> Option<BlockerDef> {
-                if let Some(name) = ent.get(key) {
-                    if let Some(&idx) = entity_map.get(name) {
-                        if let Some(aabb) = get_entity_aabb(&vmf.entities[idx]) {
+                if let Some(name) = ent.get(key)
+                    && let Some(&idx) = entity_map.get(name)
+                        && let Some(aabb) = get_entity_aabb(&vmf.entities[idx]) {
                             let mut flag = 1; // TODO: move it to fgd!!
                             if let LightType::Rect { bidirectional: true, .. } = light_type {
                                 flag = 2; // temp workaround
@@ -197,8 +195,6 @@ pub fn extract_lights(vmf: &VmfFile) -> anyhow::Result<Vec<LightDef>> {
                                 flag,
                             });
                         }
-                    }
-                }
                 None
             };
 
@@ -212,7 +208,7 @@ pub fn extract_lights(vmf: &VmfFile) -> anyhow::Result<Vec<LightDef>> {
             let spawnflags = ent.get("spawnflags").and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
             let initially_dark = (spawnflags & 1) != 0;
             let targetname = ent.targetname() // todo i dont like this shit!
-                .map(|s|sanitize_name(s))
+                .map(sanitize_name)
                 .unwrap_or_else(|| ent.id().to_string());
 
             lights.push(LightDef {
@@ -237,7 +233,7 @@ pub fn extract_lights(vmf: &VmfFile) -> anyhow::Result<Vec<LightDef>> {
 pub fn strip_pbr_entities(vmf: &mut VmfFile) {
     vmf.entities.retain(|ent| {
         let class = ent.classname().unwrap_or("").to_lowercase();
-        class.contains("func_ggx") == false
+        !class.contains("func_ggx")
     });
 }
 

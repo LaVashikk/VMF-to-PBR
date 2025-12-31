@@ -49,7 +49,7 @@ pub fn trace_ray_closest(start: Vec3, dir: Vec3, max_dist: f32, brushes: &[Conve
     let mut closest_t = max_dist;
     let mut hit_data = None;
 
-    for (_i, brush) in brushes.iter().enumerate() {
+    for brush in brushes.iter() {
         if !ray_aabb_intersect(start, dir, max_dist, &brush._bounds) {
             continue;
         }
@@ -118,9 +118,7 @@ fn intersect_brush(origin: Vec3, dir: Vec3, max_dist: f32, brush: &ConvexBrush) 
                     t_near = t;
                     enter_plane_idx = Some(i);
                 }
-            } else {
-                if t < t_far { t_far = t; }
-            }
+            } else if t < t_far { t_far = t; }
             if t_near > t_far || t_far < 0.0 { return None; }
         }
     }

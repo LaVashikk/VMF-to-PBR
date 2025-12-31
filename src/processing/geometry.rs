@@ -1,4 +1,4 @@
-use crate::{math::{cross, dot, mul, normalize, sub, Vec3, AABB}, processing::utils};
+use crate::{math::{dot, mul, Vec3, AABB}, processing::utils};
 use log::{debug, warn};
 use vmf_forge::prelude::{Entity, Solid};
 

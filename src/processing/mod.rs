@@ -1,6 +1,5 @@
 use geometry::ConvexBrush;
 use log::{debug, info, warn, error};
-use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use vmf_forge::prelude::{Entity, VmfFile};
@@ -56,7 +55,7 @@ pub fn process_map_pipeline(
         if let Some(connections) = &ent.connections {
             for (output, value) in connections {
                 // Parse VMF connection string: "TargetEntity;Input;Param;Delay;Limit"
-                let parts: Vec<&str> = value.split(|c| c == ',' || c == '\x1B').collect();
+                let parts: Vec<&str> = value.split([',', '\x1B']).collect();
                 let target = parts[0].trim();
                 let input = parts[1].trim();
                 let delay = parts.get(3).and_then(|s| s.trim().parse::<f32>().ok()).unwrap_or(0.0);
@@ -131,16 +130,14 @@ pub fn process_map_pipeline(
             let mut force_lights: HashSet<String> = HashSet::new();
 
             for i in 1..=MAX_CUSTOM_SLOTS {
-                if let Some(name) = ent.get(&format!("exclude_light_{}", i)) {
-                    if !name.is_empty() {
+                if let Some(name) = ent.get(&format!("exclude_light_{}", i))
+                    && !name.is_empty() {
                         exclude_lights.insert(sanitize_name(name));
                     }
-                }
-                if let Some(name) = ent.get(&format!("force_light_{}", i)) {
-                    if !name.is_empty() {
+                if let Some(name) = ent.get(&format!("force_light_{}", i))
+                    && !name.is_empty() {
                         force_lights.insert(sanitize_name(name));
                     }
-                }
             }
 
             let mut scored_lights: Vec<(usize, f32)> = Vec::new();
@@ -313,8 +310,8 @@ pub fn process_map_pipeline(
 
                     // Calculate offset based on the "toolspbr" face normal
                     for side in &solid.sides {
-                        if side.material.eq_ignore_ascii_case(TARGET_MATERIAL) {
-                            if let Some(points) = parse_plane_points(&side.plane) {
+                        if side.material.eq_ignore_ascii_case(TARGET_MATERIAL)
+                            && let Some(points) = parse_plane_points(&side.plane) {
                                 let normal = calc_face_normal(points);
                                 let max_axis = normal[0].abs().max(normal[1].abs()).max(normal[2].abs());
                                 calculated_offset = Some(mul(normal, GEOMETRY_OFFSET_UNITS * max_axis));
@@ -331,7 +328,6 @@ pub fn process_map_pipeline(
 
                                 break;
                             }
-                        }
                     }
 
                     for side in &mut solid.sides {
