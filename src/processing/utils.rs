@@ -4,7 +4,7 @@ use regex::Regex;
 use crate::math::{add, cross, normalize, sub, Vec3};
 
 pub static PLANE_RE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\(([\d\.\-]+)\s+([\d\.\-]+)\s+([\d\.\-]+)\)").expect("Invalid Regex")
+    Regex::new(r"\(([\d\.\-eE]+)\s+([\d\.\-eE]+)\s+([\d\.\-eE]+)\)").expect("Invalid Regex")
 });
 
 /// Extracts 3 plane points from the VMF string "(x y z) (x y z) (x y z)"
