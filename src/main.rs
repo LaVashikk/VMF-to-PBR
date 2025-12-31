@@ -4,14 +4,7 @@ use log::{info, warn, error};
 use simplelog::{LevelFilter, SimpleLogger};
 use std::path::PathBuf;
 use vmf_forge::prelude::VmfFile;
-
-mod generator;
-mod math;
-mod parser;
-mod processing;
-mod types;
-mod nut_gen;
-mod vtf_writer;
+use pbr_lut_gen::*;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
