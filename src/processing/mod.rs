@@ -102,6 +102,8 @@ pub fn process_map_pipeline(
             ent.set("rendermode".to_string(), "2".to_string());
 
             let template_material = ent.get("template_material").cloned();
+            let origin = ent.get("origin").cloned();
+            let surface_id = ent.id();
             let cluster_name = if let Some(name) = ent.targetname() {
                 name.to_string()
             } else {
@@ -111,7 +113,7 @@ pub fn process_map_pipeline(
             };
 
             // == Scoring & Light Selection
-            debug!("Processing surface: {}", cluster_name);
+            debug!("Processing surface: {} (hammer id: {})", cluster_name, surface_id);
             let surface_aabb = geometry::get_entity_aabb(ent).unwrap_or(AABB::new());
 
             let mut exclude_lights: HashSet<String> = HashSet::new();
@@ -187,9 +189,9 @@ pub fn process_map_pipeline(
                 .collect();
 
             if selected_lights.is_empty() {
-                warn!("Surface '{}' has no active lights.", cluster_name);
+                warn!("Surface '{}' (id: {}, pos: '{}') has no active lights.", cluster_name, surface_id, origin.as_deref().unwrap_or_default());
             } else {
-                info!("Surface '{}' -> assigned {} lights. (Rejected: {})", cluster_name, selected_lights.len(), rejected_lights.len());
+                info!("Surface '{}' (id: {}) -> assigned {} lights. (Rejected: {})", cluster_name, surface_id, selected_lights.len(), rejected_lights.len());
                 debug!("  -> Selected Lights: {:?}", selected_lights.iter().map(|(v, _)| &v.debug_id).collect::<Vec<_>>());
                 if !rejected_lights.is_empty() {
                      debug!("  -> Rejected: {:?}", rejected_lights.iter().map(|(v, s)| format!("{} ({:.2})", v.debug_id, s)).collect::<Vec<_>>());
@@ -231,6 +233,7 @@ pub fn process_map_pipeline(
                         new_entities.push(ctrl_ent);
 
                         // Back-patching connections
+                        log::debug!("Back-patching connections for {}. {:?}", ctrl_name, conns);
                         for conn in conns {
                             let val = match conn.input_type {
                                 LightInputType::TurnOn => "1",
@@ -243,6 +246,8 @@ pub fn process_map_pipeline(
                                 .or_default()
                                 .push((conn.output_name.clone(), new_conn_str));
                         }
+                    } else {
+                        log::debug!("lights for {} don't have inputs", ctrl_name);
                     }
                 }
             }
@@ -262,9 +267,8 @@ pub fn process_map_pipeline(
                 let vtf_path = mat_output_dir.join(format!("{}.vtf", lut_filename));
                 let vmt_path = mat_output_dir.join(format!("{}.vmt", cluster_name));
 
-                generator::generate_exr(&cluster, &exr_path)?;
-                if let Err(e) = generator::compile_to_vtf(&exr_path, &vtf_path) {
-                    error!("Failed to compile VTF for {}: {}", cluster_name, e);
+                if let Err(e) = generator::generate_vtf(&cluster, &vtf_path) {
+                    error!("Failed to create VTF for {}: {}", cluster_name, e);
                 }
 
                 let vtf_rel_path = mat_base_rel.join(&lut_filename);
@@ -314,6 +318,9 @@ pub fn process_map_pipeline(
                         }
                     }
                 }
+                if !material_updated {
+                    warn!("The cluster with id {} has no {} texture. PBS will be skipped!", surface_id, TARGET_MATERIAL);
+                }
             }
 
             clusters.push(cluster);
@@ -359,13 +366,6 @@ pub fn build_collision_world(vmf: &VmfFile) -> Vec<ConvexBrush> {
             debug!("Found collidable entity: class='{}', targetname='{}'", classname, ent.targetname().unwrap_or("N/A"));
             if let Some(solids) = &ent.solids {
                 for solid in solids {
-                    for side in &solid.sides {
-                        if side.material.to_lowercase().contains("glass") {
-                            debug!("Ignoring {} because it has a glass material", ent.id());
-                            continue 'main;
-                        }
-                    }
-
                     if let Some(brush) = ConvexBrush::from_vmf_solid(solid) {
                         brushes.push(brush);
                     }

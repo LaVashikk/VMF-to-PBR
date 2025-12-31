@@ -25,14 +25,15 @@ pub fn extract_lights(vmf: &VmfFile) -> anyhow::Result<Vec<LightDef>> {
         let ent = &vmf.entities[i];
         let classname = ent.classname().unwrap_or("");
 
-        // Skip disabled lights
-        if classname != "func_ggx_area"
-            && ent.get("pbr_enabled").map(|v| v.as_str()).unwrap_or("0") == "0"
-        {
-            continue;
-        }
-
         if classname == "light" || classname == "light_spot" || classname == "func_ggx_area" {
+            // Skip disabled lights
+            if classname != "func_ggx_area"
+                && ent.get("pbr_enabled").map(|v| v.as_str()).unwrap_or("0") == "0"
+            {
+                log::debug!("skipping {} ({:?}) because pbr_enabled is 0 (class '{}')", ent.id(), ent.targetname(), classname);
+                continue;
+            }
+
             // == PHASE 1: BASIC PROPERTIES
             let origin_vec = parse_vector(ent.get("origin").unwrap_or(&"0 0 0".to_string()));
             let light_val = ent.get("_light").map(|v| v.as_str()).unwrap_or("255 255 255 200");

@@ -47,6 +47,7 @@ pub fn calculate_score(
     // Estimated surface brightness (no way)
     let estimated_brightness = light.intensity * attenuation * window_sq;
     if estimated_brightness < 0.5 {
+        debug!("  > Culled by estimated_brightness ({} < 0.5)", estimated_brightness);
         return 0.0;
     }
 
@@ -73,8 +74,8 @@ pub fn calculate_score(
     // Final Score
     let score = estimated_brightness * visibility_factor;
 
-    debug!("  > Light {} | Brightness: {:.2} | Vis: {:.2} | Score: {:.2}",
-           light.debug_id, estimated_brightness, visibility_factor, score);
+    debug!("  > Light {} ({}) | Brightness: {:.2} | Vis: {:.2} | Score: {:.2}",
+           light.debug_id, light.light_type.name(), estimated_brightness, visibility_factor, score);
 
     score
 }
