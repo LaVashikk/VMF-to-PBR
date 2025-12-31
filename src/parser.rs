@@ -204,7 +204,7 @@ pub fn extract_lights(vmf: &VmfFile) -> anyhow::Result<Vec<LightDef>> {
 
             let blockers = [
                 process_blocker("pbr_blocker_name"),
-                process_blocker("pbr_blocker_name2"),
+                process_blocker("pbr_blocker_name_2"),
                 // More can be added in the future .-.
             ];
 
