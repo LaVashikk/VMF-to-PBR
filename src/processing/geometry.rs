@@ -1,4 +1,4 @@
-use crate::math::{cross, dot, normalize, sub, AABB, Vec3};
+use crate::{math::{cross, dot, mul, normalize, sub, Vec3, AABB}, processing::utils};
 use log::{debug, warn};
 use vmf_forge::prelude::{Entity, Solid};
 
@@ -6,10 +6,26 @@ use vmf_forge::prelude::{Entity, Solid};
 pub struct Plane {
     pub normal: Vec3,
     pub dist: f32,
+    pub u_axis: String,
+    pub v_axis: String,
+    pub material: String,
+}
+
+impl Plane {
+    pub fn new(normal: Vec3, dist: f32) -> Self {
+        Self {
+            normal,
+            dist,
+            u_axis: String::new(),
+            v_axis: String::new(),
+            material: String::from("default"),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct ConvexBrush {
+    pub id: u64,
     pub planes: Vec<Plane>,
     pub _bounds: AABB,
 }
@@ -21,6 +37,13 @@ impl ConvexBrush {
         let mut aabb = AABB::new();
         let mut valid_points_found = false;
 
+        // Check if this is a displacement brush
+        // In Source, if a brush has a displacement face, only that face "exists" for physics/vis usually.
+        let is_displacement = solid.sides.iter().any(|s| s.dispinfo.is_some());
+        if is_displacement {
+            return None
+        }
+
         for side in &solid.sides {
             // Parse 3 points of the plane
             let points = match super::utils::parse_plane_points(&side.plane) {
@@ -31,37 +54,24 @@ impl ConvexBrush {
                 }
             };
 
-            let p1 = points[0];
-            let p2 = points[1];
-            let p3 = points[2];
-
-            // Update AABB (Approximately, using plane points. For a precise AABB,
+            // Approximately, using plane points. For a precise AABB,
             // one would need to find plane intersections, but for VMF, plane points
-            // usually lie on the brush corners, so this is okay).
-            aabb.extend(p1);
-            aabb.extend(p2);
-            aabb.extend(p3);
+            // usually lie on the brush corners, so this is okay
+            aabb.extend(points[0]);
+            aabb.extend(points[1]);
+            aabb.extend(points[2]);
             valid_points_found = true;
 
             // Calculate the plane normal
-            // Vectors for the triangle sides
-            let v1 = sub(p2, p1);
-            let v2 = sub(p3, p1);
-
-            // VMF winding order is counter-clockwise, so cross(v1, v2) should point outwards.
-            // Flipping to cross(v2, v1) to test if winding order is inverted in the source data.
-            let n = normalize(cross(v2, v1));
-
-            // Calculate distance D
-            // Equation: dot(N, P) + D = 0  =>  D = -dot(N, P)
-            // Note: Some engines use D = dot(N, P). It's a matter of convention.
-            // We use: dot(N, P) + dist = 0.
-            // If a point is outside (in front of the plane), then dot(N, P) + dist > 0.
-            let d = -dot(n, p1);
+            let n = mul(utils::calc_face_normal(points), -1.0); // todo haha
+            let d = -dot(n, points[0]);
 
             planes.push(Plane {
                 normal: n,
                 dist: d,
+                u_axis: side.u_axis.clone(),
+                v_axis: side.v_axis.clone(),
+                material: side.material.clone(),
             });
         }
 
@@ -72,6 +82,7 @@ impl ConvexBrush {
 
         debug!("Created ConvexBrush for solid ID {} with {} planes. AABB: min={:?}, max={:?}", solid.id, planes.len(), aabb.min, aabb.max);
         Some(ConvexBrush {
+            id: solid.id,
             planes,
             _bounds: aabb,
         })
