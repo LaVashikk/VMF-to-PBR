@@ -207,9 +207,12 @@ pub fn extract_lights(vmf: &VmfFile) -> anyhow::Result<Vec<LightDef>> {
             // == PHASE 4: FINALIZEE
             let spawnflags = ent.get("spawnflags").and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
             let initially_dark = (spawnflags & 1) != 0;
+            let targetname = ent.targetname() // todo i dont like this shit!
+                .map(|s|sanitize_name(s))
+                .unwrap_or_else(|| ent.id().to_string());
 
             lights.push(LightDef {
-                debug_id: ent.targetname().map(|s| s.replace(".", "_")).unwrap_or_else(|| ent.id().to_string()),
+                debug_id: targetname, // todo: rename
                 is_named_light: ent.targetname().is_some(),
                 light_type,
                 pos: final_pos,
@@ -250,6 +253,12 @@ fn parse_color_intensity(s: &str) -> ([f32; 3], f32) {
     } else {
         ([1.0, 1.0, 1.0], 200.0)
     }
+}
+
+pub fn sanitize_name(string: &str) -> String {
+    string.chars()
+        .filter(|&c| !matches!(c, '.' | '-' | ' '))
+        .collect::<String>()
 }
 
 /// Helper: Convert Source angles to Vector

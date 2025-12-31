@@ -5,6 +5,13 @@ use std::fs::File;
 use std::io::{self, Write};
 use std::path::Path;
 
+const SANITIZER_FUNC: &str = "::SanitizeName <- function(name) {
+    local parts = split(name, \"-. \")
+    local result = \"_\"
+    foreach(part in parts) result += part
+    return result
+}";
+
 struct LightAssociation {
     surface: String,
     rank: usize,
@@ -33,6 +40,7 @@ pub fn generate_nut(
         }
     }
 
+    writeln!(file, "{}", SANITIZER_FUNC)?;
     writeln!(file, "::PBR_DATA <- {{")?;
 
     // == Generate Surfaces

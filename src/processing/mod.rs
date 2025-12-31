@@ -5,6 +5,7 @@ use std::path::Path;
 use vmf_forge::prelude::{Entity, VmfFile};
 use crate::generator::{self, LUT_WIDTH};
 use crate::math::{mul, AABB};
+use crate::parser::sanitize_name;
 use crate::types::{LightCluster, LightDef};
 use utils::*;
 
@@ -122,12 +123,12 @@ pub fn process_map_pipeline(
             for i in 1..=MAX_CUSTOM_SLOTS {
                 if let Some(name) = ent.get(&format!("exclude_light_{}", i)) {
                     if !name.is_empty() {
-                        exclude_lights.insert(name.clone());
+                        exclude_lights.insert(sanitize_name(name));
                     }
                 }
                 if let Some(name) = ent.get(&format!("force_light_{}", i)) {
                     if !name.is_empty() {
-                        force_lights.insert(name.clone());
+                        force_lights.insert(sanitize_name(name));
                     }
                 }
             }
