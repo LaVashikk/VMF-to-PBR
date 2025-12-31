@@ -1,10 +1,11 @@
 use geometry::ConvexBrush;
 use log::{debug, info, warn, error};
+use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use vmf_forge::prelude::{Entity, VmfFile};
 use crate::generator::{self, LUT_WIDTH};
-use crate::math::{mul, AABB};
+use crate::math::{add, mul, AABB};
 use crate::parser::sanitize_name;
 use crate::types::{LightCluster, LightDef};
 use utils::*;
@@ -17,10 +18,11 @@ pub mod utils;
 // Defines the material that identifies faces to be patched
 const TARGET_MATERIAL: &str = "tools/toolspbr";
 const GEOMETRY_OFFSET_UNITS: f32 = 0.975; // for offsets
+const UV_SEARCH_DIST: f32 = 16.0;
 
 const MAX_CUSTOM_SLOTS: usize = 4; // for force include/exclude
 
-
+#[derive(Debug)]
 struct LightConnection {
     source_entity_idx: usize,
     output_name: String,
@@ -67,7 +69,15 @@ pub fn process_map_pipeline(
                 };
 
                 if let Some(it) = input_type {
-                    let key = target.to_lowercase();
+                    // if target is "!self" -> then use "ent.targetname()"
+                    let maybe_key = if target.eq_ignore_ascii_case("!self") {
+                        ent.targetname()
+                    } else {
+                        Some(target)
+                    };
+                    let Some(raw_key) = maybe_key else { continue };
+                    let key = raw_key.to_lowercase();
+
                     debug!("  Found: Ent[{}] {} -> {}.{:?} (Delay: {})",
                             idx, output, key, it, delay);
 
@@ -207,32 +217,30 @@ pub fn process_map_pipeline(
                 }
                 if light.is_named_light {
                     let lookup_key = light.debug_id.trim().to_lowercase();
+                    let ctrl_name = format!("{}_ctrl_{}", cluster_name, i);
+                    let p = mat_base_rel.join(&cluster_name);
+                    let mat_name = p.to_string_lossy().replace('\\', "/");
+
+                    let mut ctrl_ent = Entity::new("material_modify_control", 9999899 + surface_counter);
+                    ctrl_ent.set("targetname".to_string(), ctrl_name.clone());
+                    ctrl_ent.set("parentname".to_string(), cluster_name.clone());
+                    ctrl_ent.set("materialName".to_string(), mat_name);
+
+                    // Map Index to Variable ($c4_x, y, z, w)
+                    let var = match i {
+                        0 => "$c4_x",
+                        1 => "$c4_y",
+                        2 => "$c4_z",
+                        3 => "$c4_w",
+                        _ => unreachable!()
+                    };
+                    ctrl_ent.set("materialVar".to_string(), var.to_string());
+                    let center = surface_aabb.center;
+                    ctrl_ent.set("origin".to_string(), format!("{} {} {}", center[0], center[1], center[2]));
+
+                    new_entities.push(ctrl_ent);
 
                     if let Some(conns) = light_connection_registry.get(&lookup_key) {
-                        let ctrl_name = format!("{}_ctrl_{}", cluster_name, i);
-                        let p = mat_base_rel.join(&cluster_name);
-                        let mat_name = p.to_string_lossy().replace('\\', "/");
-
-                        let mut ctrl_ent = Entity::new("material_modify_control", 0);
-                        ctrl_ent.remove_key("id"); // we don't need the 'id'!
-                        ctrl_ent.set("targetname".to_string(), ctrl_name.clone());
-                        ctrl_ent.set("parentname".to_string(), cluster_name.clone());
-                        ctrl_ent.set("materialName".to_string(), mat_name);
-
-                        // Map Index to Variable ($c4_x, y, z, w)
-                        let var = match i {
-                            0 => "$c4_x",
-                            1 => "$c4_y",
-                            2 => "$c4_z",
-                            3 => "$c4_w",
-                            _ => unreachable!()
-                        };
-                        ctrl_ent.set("materialVar".to_string(), var.to_string());
-                        let center = surface_aabb.center;
-                        ctrl_ent.set("origin".to_string(), format!("{} {} {}", center[0], center[1], center[2]));
-
-                        new_entities.push(ctrl_ent);
-
                         // Back-patching connections
                         log::debug!("Back-patching connections for {}. {:?}", ctrl_name, conns);
                         for conn in conns {
@@ -264,7 +272,6 @@ pub fn process_map_pipeline(
             // == Generate Assets
             if !is_draft_run {
                 let lut_filename = format!("{}_lut", cluster_name);
-                let exr_path = mat_output_dir.join(format!("{}.exr", lut_filename));
                 let vtf_path = mat_output_dir.join(format!("{}.vtf", lut_filename));
                 let vmt_path = mat_output_dir.join(format!("{}.vmt", cluster_name));
 
@@ -278,7 +285,8 @@ pub fn process_map_pipeline(
                     &vmt_path,
                     &vtf_rel_str,
                     template_material.as_deref(),
-                    initial_c4
+                    initial_c4,
+                    surface_id,
                 )?;
             } else {
                 // it's draft, no need change geometry
@@ -290,17 +298,37 @@ pub fn process_map_pipeline(
             let patch_material_path = mat_base_rel.join(&cluster_name);
             let patch_material_str = patch_material_path.to_string_lossy().replace('\\', "/");
 
-            // Shifting geometry TODO!
+            // Shifting geometry & UV Fix
             if let Some(solids) = &mut ent.solids {
+                let mut material_updated = false;
+                let origin_vec = if let Some(o_str) = origin {
+                    crate::math::parse_vector(&o_str)
+                } else {
+                    surface_aabb.center
+                };
+
                 for solid in solids {
                     let mut calculated_offset = None;
+                    let mut parent_uv: Option<(String, String)> = None;
 
                     // Calculate offset based on the "toolspbr" face normal
                     for side in &solid.sides {
                         if side.material.eq_ignore_ascii_case(TARGET_MATERIAL) {
                             if let Some(points) = parse_plane_points(&side.plane) {
                                 let normal = calc_face_normal(points);
-                                calculated_offset = Some(mul(normal, GEOMETRY_OFFSET_UNITS));
+                                let max_axis = normal[0].abs().max(normal[1].abs()).max(normal[2].abs());
+                                calculated_offset = Some(mul(normal, GEOMETRY_OFFSET_UNITS * max_axis));
+
+                                // UV Fix Logic
+                                let start = add(origin_vec, mul(normal, -5.)); // todo
+                                debug!("  [UV Fix] Casting ray from {:?} dir {:?} (dist: {})", start, normal, UV_SEARCH_DIST);
+                                if let Some(hit) = tracer::trace_ray_closest(start, normal, UV_SEARCH_DIST, &world_brushes) {
+                                    debug!("    -> Hit world brush at dist {:.2}. Copying UVs.", hit.t);
+                                    parent_uv = Some((hit.u_axis.to_string(), hit.v_axis.to_string()));
+                                } else {
+                                    debug!("    -> No parent surface found within range.");
+                                }
+
                                 break;
                             }
                         }
@@ -315,7 +343,14 @@ pub fn process_map_pipeline(
 
                         // Update material
                         if side.material.eq_ignore_ascii_case(TARGET_MATERIAL) {
+                            if let Some((ref u, ref v)) = parent_uv {
+                                side.u_axis = u.clone();
+                                side.v_axis = v.clone();
+                            } else {
+                                warn!("No parent_uv for {} (hammer id: {})", cluster_name, surface_id); // todo: improve msg
+                            }
                             side.material = patch_material_str.clone();
+                            material_updated = true;
                         }
                     }
                 }
@@ -361,8 +396,12 @@ pub fn build_collision_world(vmf: &VmfFile) -> Vec<ConvexBrush> {
     }
 
     // Func Detail
-    'main: for ent in vmf.entities.iter() {
+    for ent in vmf.entities.iter() {
         let classname = ent.classname().unwrap_or("");
+        if let Some(should_skip) = ent.get("pbr_geometry_ignore") {  // todo
+            if should_skip != "0" { continue }
+        }
+
         if classname == "func_detail" { // ? i think we should ignore any dynamic ents
             debug!("Found collidable entity: class='{}', targetname='{}'", classname, ent.targetname().unwrap_or("N/A"));
             if let Some(solids) = &ent.solids {

@@ -27,6 +27,16 @@ pub enum LightType {
     },
 }
 
+impl LightType {
+    pub fn name(&self) -> &'static str {
+        match self {
+            LightType::Point => "Point",
+            LightType::Spot { .. } => "Spot",
+            LightType::Rect { .. } => "Area",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct LightDef {
