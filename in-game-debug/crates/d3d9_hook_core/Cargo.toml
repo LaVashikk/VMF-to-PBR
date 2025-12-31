@@ -1,0 +1,10 @@
+[package]
+name = "d3d9_hook_core"
+publish.workspace = true
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+log.workspace = true
+anyhow.workspace = true
+windows.workspace = true

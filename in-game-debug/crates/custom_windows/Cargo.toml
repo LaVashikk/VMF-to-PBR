@@ -1,0 +1,15 @@
+[package]
+name = "custom_windows"
+publish.workspace = true
+edition.workspace = true
+version.workspace = true
+
+[dependencies]
+egui.workspace = true
+log.workspace = true
+windows.workspace = true
+source-sdk.workspace = true
+vmf-forge = "0.4.1"
+rfd = "0.14"
+pbr-lut-gen = { path = "../../../" }
+egui-snow = "0.33"
