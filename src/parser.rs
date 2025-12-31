@@ -57,8 +57,8 @@ pub fn extract_lights(vmf: &VmfFile) -> anyhow::Result<Vec<LightDef>> {
             let fifty_percent_val = ent.get("_fifty_percent_distance").and_then(|s| s.parse::<f32>().ok()).filter(|&v| v > 0.1);
             let mut final_pos = origin_vec;
 
-            let shader_intensity;
-            let shader_k;
+            let mut shader_intensity;
+            let mut shader_k;
             let mut range;
             let light_type;
 
@@ -86,17 +86,22 @@ pub fn extract_lights(vmf: &VmfFile) -> anyhow::Result<Vec<LightDef>> {
                     if height < 1.0 { height = 1.0; }
                 }
 
-                let area = width * height;
-                let virtual_c = area.max(100.0);
-                let virtual_q = 1.0;
+                // Force standard quadratic falloff model for consistency with point lights.
+                // This prevents the excessive range and "infinite" falloff behavior of the original area light formula.
+                let c = 0.0;
+                let l = 0.0;
+                let q = 1.0; 
 
-                // Ratio at 100 units. Formula: C + (Q * 100^2). (Linear is 0)
-                let ratio = virtual_c + (10000.0 * virtual_q);
-                let src_energy = intensity * ratio;
+                let ratio = c + (100.0 * l) + (10000.0 * q);
+                let src_energy = if ratio > 0.001 { intensity * ratio } else { 0.0 };
+                let math_c = 1.0;
 
-                // Normalize for Shader: I / (1 + K*d^2)
-                shader_intensity = src_energy / virtual_c;
-                shader_k = virtual_q / virtual_c;
+                shader_intensity = src_energy / math_c;
+                shader_k = q / math_c;
+
+                // Normalize intensity to align with standard point light scoring.
+                // A factor of 0.25 balances the visual brightness and ensures the light's importance score
+                shader_intensity *= 0.25;
 
                 // Solver for Range
                 if shader_k > 1e-8 {
@@ -113,7 +118,6 @@ pub fn extract_lights(vmf: &VmfFile) -> anyhow::Result<Vec<LightDef>> {
                     height,
                     bidirectional,
                 };
-
             } else { // POINT & SPOT lights
                 let mut c = ent.get("_constant_attn").and_then(|s| s.parse::<f32>().ok()).unwrap_or(0.0);
                 let l = ent.get("_linear_attn").and_then(|s| s.parse::<f32>().ok()).unwrap_or(0.0);
