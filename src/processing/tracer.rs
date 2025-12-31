@@ -1,8 +1,14 @@
-use crate::math::{dot, sub, Vec3};
+use crate::math::{dot, sub, Vec3, AABB};
 use crate::processing::geometry::ConvexBrush;
 use log::debug;
 
 const EPSILON: f32 = 0.001;
+
+pub struct RayHit<'a> {
+    pub t: f32,
+    pub u_axis: &'a str,
+    pub v_axis: &'a str,
+}
 
 /// Checks whether the path from `start` to `end` is blocked by the `brushes` geometry.
 /// Returns true if the path is blocked (i.e., there is a shadow)
@@ -18,79 +24,116 @@ pub fn is_occluded(start: Vec3, end: Vec3, brushes: &[ConvexBrush]) -> bool {
 
     let dir = [diff[0] / dist, diff[1] / dist, diff[2] / dist];
 
-    for (brush_idx, brush) in brushes.iter().enumerate() {
-        // todo: add Broad Phase AABB Check here for optimization
-
-        // Narrow Phase: Slab Method
-        if intersect_brush(start, dir, dist, brush) {
-            debug!("      - Ray from {:?} to {:?} is occluded by brush #{}", start, end, brush_idx);
-            return true; // Shadow found
+    for brush in brushes.iter() {
+        // Broad Phase AABB Check
+        if !ray_aabb_intersect(start, dir, dist, &brush._bounds) {
+            continue;
         }
-    }
+        if let Some((_, plane_idx)) = intersect_brush(start, dir, dist, brush) {
+            let plane = &brush.planes[plane_idx];
+            let mat_lower = plane.material.to_lowercase();
 
+            if mat_lower.contains("glass") {
+                debug!("    -> Ignored: Glass texture '{}'", plane.material);
+                continue;
+            }
+
+            debug!("      - Ray from {:?} to {:?} is occluded by brush #{} ({})", start, end, brush.id, plane.material);
+            return true; // Shadow found
+         }
+    }
     false
 }
 
-/// Returns true if the ray (origin, dir) intersects the brush at a distance < max_dist
-fn intersect_brush(origin: Vec3, dir: Vec3, max_dist: f32, brush: &ConvexBrush) -> bool {
-    let mut t_near = 0.0_f32; // Entry into brush
-    let mut t_far = max_dist; // Exit from brush
+pub fn trace_ray_closest(start: Vec3, dir: Vec3, max_dist: f32, brushes: &[ConvexBrush]) -> Option<RayHit> {
+    let mut closest_t = max_dist;
+    let mut hit_data = None;
 
-    // Iterate over all planes of the brush (Slabs)
-    for plane in &brush.planes {
-        // Plane equation: dot(N, P) + d = 0
-        // Ray: P = O + t*D
-        // Substitute: dot(N, O + t*D) + d = 0
-        // dot(N, O) + t*dot(N, D) + d = 0
-        // t = -(dot(N, O) + d) / dot(N, D)
+    for (_i, brush) in brushes.iter().enumerate() {
+        if !ray_aabb_intersect(start, dir, max_dist, &brush._bounds) {
+            continue;
+        }
+
+        if let Some((t_near, plane_idx)) = intersect_brush(start, dir, closest_t, brush) {
+            // Allow slightly negative t_near to account for starting exactly on surface
+            if t_near < closest_t && t_near > -0.1 {
+                let effective_t = t_near.max(0.0);
+                closest_t = effective_t;
+                let plane = &brush.planes[plane_idx];
+                debug!("    -> New closest hit! (prev closest: {})", closest_t);
+
+                hit_data = Some(RayHit {
+                    t: effective_t,
+                    u_axis: &plane.u_axis,
+                    v_axis: &plane.v_axis,
+                });
+            }
+        }
+    }
+
+    hit_data
+}
+
+fn ray_aabb_intersect(origin: Vec3, dir: Vec3, max_dist: f32, aabb: &AABB) -> bool {
+    let mut tmin = 0.0_f32;
+    let mut tmax = max_dist;
+    for i in 0..3 {
+        if dir[i].abs() < 1e-6 {
+            if origin[i] < aabb.min[i] - EPSILON || origin[i] > aabb.max[i] + EPSILON { return false; }
+        } else {
+            let ood = 1.0 / dir[i];
+            let mut t1 = (aabb.min[i] - origin[i]) * ood;
+            let mut t2 = (aabb.max[i] - origin[i]) * ood;
+            if t1 > t2 { std::mem::swap(&mut t1, &mut t2); }
+            tmin = tmin.max(t1);
+            tmax = tmax.min(t2);
+            if tmin > tmax { return false; }
+        }
+    }
+    true
+}
+
+
+fn intersect_brush(origin: Vec3, dir: Vec3, max_dist: f32, brush: &ConvexBrush) -> Option<(f32, usize)> {
+    let mut t_near = -std::f32::MAX;
+    let mut t_far = max_dist;
+    let mut enter_plane_idx = None;
+
+    for (i, plane) in brush.planes.iter().enumerate() {
+        let mat_lower = plane.material.to_lowercase();
+        // Filter out tools textures - they cannot be hit
+        if mat_lower.contains("tools") && !mat_lower.contains("nodraw") && !mat_lower.contains("pbr_block") {
+            continue;
+        }
 
         let numer = -(dot(plane.normal, origin) + plane.dist);
         let denom = dot(plane.normal, dir);
 
         if denom.abs() < 1e-6 {
-            // Ray is parallel to the plane
-            // If numer < 0, the point is outside this plane -> ray misses the brush
-            if numer < 0.0 {
-                return false;
-            }
-            // Otherwise, the ray is inside the "slab", continue
+            if numer < 0.0 { return None; }
         } else {
-            // Calculate intersection t
             let t = numer / denom;
-
             if denom < 0.0 {
-                // We are entering the plane (Normal points against the ray direction)
                 if t > t_near {
                     t_near = t;
+                    enter_plane_idx = Some(i);
                 }
             } else {
-                // We are exiting the plane (Normal points along the ray direction)
-                if t < t_far {
-                    t_far = t;
-                }
+                if t < t_far { t_far = t; }
             }
-
-            // If entry point is further than exit point -> miss
-            if t_near > t_far {
-                return false;
-            }
-            // If exit point is negative (brush is behind) -> miss
-            if t_far < 0.0 {
-                return false;
-            }
+            if t_near > t_far || t_far < 0.0 { return None; }
         }
     }
 
-    // If we reached here, the entry and exit intervals are mathematically valid.
-    // But we need to filter out cases where the ray just touches the surface (exits at point 0).
-    if t_near < t_far - EPSILON {
-        // The ray actually passed through the "body" of the brush.
-        // Additional check: did this happen BEFORE the light source?
-        // (t_near is already guaranteed to be >= 0 due to initialization)
-        return t_near < max_dist - EPSILON;
+    // Ensure the exit point is in front of the ray start
+    if t_near < t_far - EPSILON && t_far > EPSILON && t_near < max_dist {
+        if let Some(idx) = enter_plane_idx {
+            return Some((t_near, idx));
+        } else {
+            return Some((0.0, 0));
+        }
     }
-
-    false
+    None
 }
 
 #[cfg(test)]
@@ -107,23 +150,23 @@ mod tests {
         // For wall X=size: N=(1,0,0). Point P=(size,0,0). 1*size + d = 0 => d = -size.
 
         // +X
-        planes.push(Plane { normal: [1.0, 0.0, 0.0], dist: -size });
+        planes.push(Plane::new([1.0, 0.0, 0.0], -size));
         // -X
-        planes.push(Plane { normal: [-1.0, 0.0, 0.0], dist: -size });
+        planes.push(Plane::new([-1.0, 0.0, 0.0], -size));
         // +Y
-        planes.push(Plane { normal: [0.0, 1.0, 0.0], dist: -size });
+        planes.push(Plane::new([0.0, 1.0, 0.0], -size));
         // -Y
-        planes.push(Plane { normal: [0.0, -1.0, 0.0], dist: -size });
+        planes.push(Plane::new([0.0, -1.0, 0.0], -size));
         // +Z
-        planes.push(Plane { normal: [0.0, 0.0, 1.0], dist: -size });
+        planes.push(Plane::new([0.0, 0.0, 1.0], -size));
         // -Z
-        planes.push(Plane { normal: [0.0, 0.0, -1.0], dist: -size });
+        planes.push(Plane::new([0.0, 0.0, -1.0], -size));
 
         let mut _bounds = AABB::new();
         _bounds.extend([-size, -size, -size]);
         _bounds.extend([size, size, size]);
 
-        ConvexBrush { planes, _bounds }
+        ConvexBrush { planes, _bounds, id: 0 }
     }
 
     #[test]
