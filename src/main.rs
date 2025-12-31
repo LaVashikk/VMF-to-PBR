@@ -11,6 +11,7 @@ mod parser;
 mod processing;
 mod types;
 mod nut_gen;
+mod vtf_writer;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]

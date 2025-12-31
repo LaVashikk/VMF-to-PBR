@@ -1,17 +1,15 @@
 use crate::math::{cross, dot, normalize, sub};
 use crate::types::{LightCluster, LightType};
-use exr::prelude::*;
-use log::{warn, debug};
+use log::{warn};
 use std::fs::File;
 use std::io::Write;
 
 use std::path::Path;
-use std::process::Command;
 
 pub const LUT_WIDTH: usize = 8;
 pub const LUT_HEIGHT: usize = 8;
 
-pub fn generate_exr(cluster: &LightCluster, output_path: &Path) -> anyhow::Result<()> {
+pub fn generate_vtf(cluster: &LightCluster, output_path: &Path) -> anyhow::Result<()> {
     let num_lights = cluster.lights.len();
 
     // Ensure parent directory exists
@@ -46,8 +44,8 @@ pub fn generate_exr(cluster: &LightCluster, output_path: &Path) -> anyhow::Resul
             } => {
                 type_id = 1.0;
                 dir = *direction;
-                param1 = (inner_angle / 2.0).to_radians().cos(); // TODO: check this!
-                param2 = (outer_angle / 2.0).to_radians().cos();
+                param1 = inner_angle.to_radians().cos();
+                param2 = outer_angle.to_radians().cos();
                 extra_param = *exponent;
             }
             LightType::Rect {
@@ -111,55 +109,29 @@ pub fn generate_exr(cluster: &LightCluster, output_path: &Path) -> anyhow::Resul
             }
         }
     }
+    // -----------------------------------------------------
 
-    let layer = Layer::new(
-        (LUT_WIDTH, LUT_HEIGHT),
-        LayerAttributes::default(),
-        Encoding::UNCOMPRESSED,
-        SpecificChannels::rgba(|pos: Vec2<usize>| {
-            let index = pos.y() * LUT_WIDTH + pos.x();
-            rgba_pixels[index]
-        }),
-    );
-    Image::from_layer(layer)
-        .write()
-        .to_file(output_path)
-        .map_err(|e| anyhow::anyhow!("Failed to write EXR: {}", e))?;
-
-    Ok(())
-}
-
-
-
-pub fn compile_to_vtf(exr_path: &Path, vtf_path: &Path) -> anyhow::Result<()> {
-    let exr_str = exr_path.to_str().ok_or_else(|| anyhow::anyhow!("Invalid EXR path"))?;
-    let vtf_str = vtf_path.to_str().ok_or_else(|| anyhow::anyhow!("Invalid VTF path"))?;
-
-    debug!("Compiling VTF: {} -> {}", exr_str, vtf_str);
-
-    let status = Command::new("maretf")
-        .arg("create")
-        .arg(exr_str)
-        .arg("-o")
-        .arg(vtf_str)
-        .arg("-y")
-        .arg("-f")
-        .arg("RGBA32323232F")
-        .arg("--pointsample")
-        .arg("--no-mips")
-        .arg("--clamps")
-        .arg("--clampt")
-        .status();
-
-    match status {
-        Ok(s) if s.success() => Ok(()),
-        Ok(s) => Err(anyhow::anyhow!("maretf failed with exit code: {:?}", s.code())),
-        Err(e) => Err(anyhow::anyhow!("Failed to execute maretf: {}", e)),
+    let mut raw_data = Vec::with_capacity(rgba_pixels.len() * 4);
+    for pixel in rgba_pixels {
+        raw_data.push(pixel.0); // R
+        raw_data.push(pixel.1); // G
+        raw_data.push(pixel.2); // B
+        raw_data.push(pixel.3); // A
     }
+
+    // Write VTF directly
+    let vtf_path = output_path.with_extension("vtf");
+    let params = crate::vtf_writer::VtfParams {
+        width: LUT_WIDTH as u16,
+        height: LUT_HEIGHT as u16,
+    };
+
+    crate::vtf_writer::write_rgba32f_vtf(&vtf_path, params, &raw_data)
 }
+
 
 /// Generates a Patch VMT that includes the base PBR shader and inserts the generated LUT
-pub fn generate_vmt(vmt_path: &Path, texture_rel_path: &str, base_material: Option<&str>, initial_c4: [f32; 4]) -> anyhow::Result<()> {
+pub fn generate_vmt(vmt_path: &Path, texture_rel_path: &str, base_material: Option<&str>, initial_c4: [f32; 4], surface_id: u64) -> anyhow::Result<()> {
     if let Some(parent) = vmt_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -167,8 +139,8 @@ pub fn generate_vmt(vmt_path: &Path, texture_rel_path: &str, base_material: Opti
     let mut file = File::create(vmt_path)?;
     let include_path = base_material.ok_or_else(|| {
         anyhow::anyhow!(
-            "Missing 'template_material' in entity properties for {:?}. This is required!",
-            vmt_path.file_stem().unwrap_or_default()
+            "Missing 'template_material' in entity properties for {:?} (id: {}). This is required!",
+            vmt_path.file_stem().unwrap_or_default(), surface_id
         )
     })?;
 
@@ -180,7 +152,7 @@ pub fn generate_vmt(vmt_path: &Path, texture_rel_path: &str, base_material: Opti
 
     // Normalize path separators to forward slashes for Source Engine
     let clean_path = texture_rel_path.replace('\\', "/");
-    writeln!(file, "\t\t$texture2 \"{}\"", clean_path)?;
+    writeln!(file, "\t\t$texture1 \"{}\"", clean_path)?;
 
 
     // Write $c4 vector based on light initial state
