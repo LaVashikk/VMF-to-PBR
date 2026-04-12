@@ -54,14 +54,25 @@ pub struct LightDef {
     pub initially_dark: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct ParallaxVolume {
+    pub cubemap_pos: [f32; 3], // World space position of the selected env_cubemap
+    pub ws_min: [f32; 3],      // World space AABB Min of the volume
+    pub ws_max: [f32; 3],      // World space AABB Max of the volume
+}
+
 /// Represents a collection of lights assigned to a specific surface/material.
-/// This will be baked into a single Nx8 LUT texture.
+/// This will be baked into a single Nx16 LUT texture.
 #[derive(Debug)]
 pub struct LightCluster {
     pub name: String,
     pub lights: Vec<(LightDef, f32)>,
+    pub material: String,
 
     pub bounds: crate::math::AABB,
     pub min_cluster_score: f32,
     pub rejected_lights: Vec<(LightDef, f32)>,
+
+    pub pcc_volume: Option<ParallaxVolume>,
+    pub cubemap_name: Option<String>,
 }

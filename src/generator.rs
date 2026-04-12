@@ -1,13 +1,14 @@
 use crate::math::{cross, dot, normalize, sub};
+use source_fs::{DummyVpk, FileSystem, FileSystemOptions, P2GameInfo};
 use crate::types::{LightCluster, LightType};
-use log::{warn};
+use anyhow::{Context, bail};
 use std::fs::File;
 use std::io::Write;
 
 use std::path::Path;
 
 pub const LUT_WIDTH: usize = 8;
-pub const LUT_HEIGHT: usize = 8;
+pub const LUT_HEIGHT: usize = 16;
 
 pub fn generate_vtf(cluster: &LightCluster, output_path: &Path) -> anyhow::Result<()> {
     let num_lights = cluster.lights.len();
@@ -109,6 +110,18 @@ pub fn generate_vtf(cluster: &LightCluster, output_path: &Path) -> anyhow::Resul
             }
         }
     }
+
+    // --- WRITE PCC DATA (ROW 15) ---
+    if let Some(pcc) = &cluster.pcc_volume {
+        let row = 15;
+        // World Space Box Min
+        rgba_pixels[row * LUT_WIDTH + 0] = (pcc.ws_min[0], pcc.ws_min[1], pcc.ws_min[2], 1.0);
+        // World Space Box Max
+        rgba_pixels[row * LUT_WIDTH + 1] = (pcc.ws_max[0], pcc.ws_max[1], pcc.ws_max[2], 1.0);
+        // Pixel 2: Cubemap Origin
+        rgba_pixels[row * LUT_WIDTH + 2] = (pcc.cubemap_pos[0], pcc.cubemap_pos[1], pcc.cubemap_pos[2], 1.0);
+    }
+
     // -----------------------------------------------------
 
     let mut raw_data = Vec::with_capacity(rgba_pixels.len() * 4);
@@ -131,7 +144,7 @@ pub fn generate_vtf(cluster: &LightCluster, output_path: &Path) -> anyhow::Resul
 
 
 /// Generates a Patch VMT that includes the base PBR shader and inserts the generated LUT
-pub fn generate_vmt(vmt_path: &Path, texture_rel_path: &str, base_material: Option<&str>, initial_c4: [f32; 4], surface_id: u64) -> anyhow::Result<()> {
+pub fn generate_vmt(vmt_path: &Path, texture_rel_path: &str, base_material: Option<&str>, initial_c4: [f32; 4], surface_id: u64, cubemap_path: Option<&str>) -> anyhow::Result<()> {
     if let Some(parent) = vmt_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -153,6 +166,11 @@ pub fn generate_vmt(vmt_path: &Path, texture_rel_path: &str, base_material: Opti
     // Normalize path separators to forward slashes for Source Engine
     let clean_path = texture_rel_path.replace('\\', "/");
     writeln!(file, "\t\t$texture1 \"{}\"", clean_path)?;
+
+    // Inject Cubemap if available
+    if let Some(cpath) = cubemap_path {
+        writeln!(file, "\t\t$texture2 \"{}\"", cpath)?;
+    }
 
 
     // Write $c4 vector based on light initial state

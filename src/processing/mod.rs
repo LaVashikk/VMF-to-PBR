@@ -3,8 +3,8 @@ use log::{debug, info, warn, error};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use vmf_forge::prelude::{Entity, VmfFile};
-use crate::generator::{self, LUT_WIDTH};
-use crate::math::{add, mul, AABB};
+use crate::generator::{self, LUT_WIDTH, VmtParams};
+use crate::math::{AABB, Vec3, add, dot, mul, normalize, parse_vector, sub};
 use crate::parser::sanitize_name;
 use crate::types::{LightCluster, LightDef};
 use utils::*;
@@ -95,6 +95,50 @@ pub fn process_map_pipeline(
     }
 
     info!("Registry built. Tracked targets: {}", light_connection_registry.len());
+
+    // == Processing env_cubemap
+    info!("Processing 'env_cubemap' entities...");
+    let mut cubemaps: Vec<Vec3> = Vec::new();
+    for ent in vmf.entities.iter() {
+        if ent.classname().unwrap_or("") == "env_cubemap" {
+            let origin = parse_vector(ent.get("origin").unwrap_or(&"0 0 0".to_string()));
+            cubemaps.push(origin);
+        }
+    }
+    info!("Found {} env_cubemaps.", cubemaps.len());
+
+    // == Processing func_parallax_volume
+    info!("Processing 'func_parallax_volume' entities...");
+    struct InternalVolume {
+        ws_min: Vec3,
+        ws_max: Vec3,
+        cubemaps_inside: Vec<Vec3>,
+    }
+    let mut pcc_volumes: Vec<InternalVolume> = Vec::new();
+    let mut pcc_ents_to_remove = Vec::new();
+
+    for (idx, ent) in vmf.entities.iter().enumerate() {
+        if ent.classname().unwrap_or("") == "func_parallax_volume" {
+            if let Some(aabb) = geometry::get_entity_aabb(ent) {
+                let mut inside = Vec::new();
+                for &c_pos in &cubemaps {
+                    if c_pos[0] >= aabb.min[0] && c_pos[0] <= aabb.max[0] &&
+                       c_pos[1] >= aabb.min[1] && c_pos[1] <= aabb.max[1] &&
+                       c_pos[2] >= aabb.min[2] && c_pos[2] <= aabb.max[2] {
+                        inside.push(c_pos);
+                    }
+                }
+
+                pcc_volumes.push(InternalVolume {
+                    ws_min: aabb.min,
+                    ws_max: aabb.max,
+                    cubemaps_inside: inside,
+                });
+                pcc_ents_to_remove.push(idx);
+            }
+        }
+    }
+    info!("Found {} PCC volumes.", pcc_volumes.len());
 
     // == Processing func_ggx_surface
     info!("Processing 'func_ggx_surface' entities...");
@@ -258,12 +302,77 @@ pub fn process_map_pipeline(
                 }
             }
 
+            // == Match PCC Volume
+            let mut best_pcc_data = None;
+            let center = surface_aabb.center;
+
+            let surface_normal = mul({ // todo: DRY dude. But im lazy :<
+                ent.solids.as_deref().expect("unreachable behaivor!!").iter()
+                    .flat_map(|s| &s.sides)
+                    .find(|side| side.material.eq_ignore_ascii_case(TARGET_MATERIAL))
+                    .and_then(|side| parse_plane_points(&side.plane))
+                    .map(|points| calc_face_normal(points))
+                    .unwrap() // SAFETY: trust me!
+            }, -1.0);
+
+            // todo: made better way to find closest cubemap
+            for vol in &pcc_volumes {
+                // if center[0] >= vol.ws_min[0] && center[0] <= vol.ws_max[0] &&
+                //    center[1] >= vol.ws_min[1] && center[1] <= vol.ws_max[1] &&
+                //    center[2] >= vol.ws_min[2] && center[2] <= vol.ws_max[2]
+                // {
+                       if !vol.cubemaps_inside.is_empty() {
+                           let mut best_score = f32::MIN;
+                           let mut best_c = vol.cubemaps_inside[0];
+
+                           for &c in &vol.cubemaps_inside {
+                               let to_cubemap = sub(c, center);
+                               let dist_sq = dot(to_cubemap, to_cubemap);
+                               let mut score = -dist_sq;
+
+                               let dir_to_cubemap = normalize(to_cubemap);
+                               let facing = dot(surface_normal, dir_to_cubemap);
+
+                               // Cubemap behind ur back? GFY!
+                               if facing < 0.0 {
+                                   score -= 1_000_000.0;
+                               } else {
+                                   score += facing * 100.0;
+                               }
+
+                               if score > best_score {
+                                    best_score = score;
+                                    best_c = c;
+                                }
+                           }
+
+                           best_pcc_data = Some(crate::types::ParallaxVolume {
+                               cubemap_pos: best_c,
+                               ws_min: vol.ws_min,
+                               ws_max: vol.ws_max,
+                           });
+                       }
+                    //    break;
+                //    }
+            }
+
+            let cubemap_name = if let Some(pcc) = &best_pcc_data {
+                let ox = pcc.cubemap_pos[0] as i32;
+                let oy = pcc.cubemap_pos[1] as i32;
+                let oz = pcc.cubemap_pos[2] as i32;
+                Some(format!("maps/{}/c{}_{}_{}.hdr.vtf", map_name, ox, oy, oz))
+            } else {
+                None
+            };
+
             let cluster = LightCluster {
                 name: cluster_name.clone(),
                 bounds: surface_aabb,
                 lights: selected_lights,
                 rejected_lights,
-                min_cluster_score: min_score
+                min_cluster_score: min_score,
+                pcc_volume: best_pcc_data,
+                cubemap_name: cubemap_name.clone(),
             };
 
             // == Generate Assets
@@ -284,6 +393,7 @@ pub fn process_map_pipeline(
                     template_material.as_deref(),
                     initial_c4,
                     surface_id,
+                    cubemap_name.as_deref(),
                 )?;
             } else {
                 // it's draft, no need change geometry

@@ -233,8 +233,9 @@ pub fn extract_lights(vmf: &VmfFile) -> anyhow::Result<Vec<LightDef>> {
 pub fn strip_pbr_entities(vmf: &mut VmfFile) {
     vmf.entities.retain(|ent| {
         let class = ent.classname().unwrap_or("").to_lowercase();
-        !class.contains("func_ggx")
+        !class.contains("func_ggx") && !class.eq_ignore_ascii_case("func_parallax_volume")
     });
+
 }
 
 /// Helper: Parse Source "_light" string
