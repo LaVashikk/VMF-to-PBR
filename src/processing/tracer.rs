@@ -5,6 +5,7 @@ use log::debug;
 const EPSILON: f32 = 0.001;
 
 pub struct RayHit<'a> {
+    pub id: u64,
     pub t: f32,
     pub u_axis: &'a str,
     pub v_axis: &'a str,
@@ -32,6 +33,9 @@ pub fn is_occluded(start: Vec3, end: Vec3, brushes: &[ConvexBrush]) -> bool {
         if let Some((_, plane_idx)) = intersect_brush(start, dir, dist, brush) {
             let plane = &brush.planes[plane_idx];
             let mat_lower = plane.material.to_lowercase();
+            if mat_lower.contains("tools") && !mat_lower.contains("nodraw") && !mat_lower.contains("pbr_block") {
+                continue; // what the tool skybox bruh fuck u
+            }
 
             if mat_lower.contains("glass") {
                 debug!("    -> Ignored: Glass texture '{}'", plane.material);
@@ -45,7 +49,7 @@ pub fn is_occluded(start: Vec3, end: Vec3, brushes: &[ConvexBrush]) -> bool {
     false
 }
 
-pub fn trace_ray_closest(start: Vec3, dir: Vec3, max_dist: f32, brushes: &[ConvexBrush]) -> Option<RayHit> {
+pub fn trace_ray_closest<'a>(start: Vec3, dir: Vec3, max_dist: f32, brushes: &'a [ConvexBrush]) -> Option<RayHit<'a>> {
     let mut closest_t = max_dist;
     let mut hit_data = None;
 
@@ -60,10 +64,15 @@ pub fn trace_ray_closest(start: Vec3, dir: Vec3, max_dist: f32, brushes: &[Conve
                 let effective_t = t_near.max(0.0);
                 closest_t = effective_t;
                 let plane = &brush.planes[plane_idx];
+                let mat_lower = plane.material.to_lowercase();
+                if mat_lower.contains("tools") && !mat_lower.contains("nodraw") && !mat_lower.contains("pbr_block") {
+                    continue;
+                }
                 debug!("    -> New closest hit! (prev closest: {})", closest_t);
 
                 hit_data = Some(RayHit {
                     t: effective_t,
+                    id: brush.id,
                     u_axis: &plane.u_axis,
                     v_axis: &plane.v_axis,
                 });
