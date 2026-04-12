@@ -242,6 +242,7 @@ pub fn process_map_pipeline(
 
             if selected_lights.is_empty() {
                 warn!("Surface '{}' (id: {}, pos: '{}') has no active lights.", cluster_name, surface_id, origin.as_deref().unwrap_or_default());
+                // continue; // TODO: process it as additional arg
             } else {
                 info!("Surface '{}' (id: {}) -> assigned {} lights. (Rejected: {})", cluster_name, surface_id, selected_lights.len(), rejected_lights.len());
                 debug!("  -> Selected Lights: {:?}", selected_lights.iter().map(|(v, _)| &v.debug_id).collect::<Vec<_>>());
@@ -367,6 +368,7 @@ pub fn process_map_pipeline(
 
             let cluster = LightCluster {
                 name: cluster_name.clone(),
+                material: template_material.clone().unwrap_or_default(),
                 bounds: surface_aabb,
                 lights: selected_lights,
                 rejected_lights,
@@ -381,7 +383,17 @@ pub fn process_map_pipeline(
                 let vtf_path = mat_output_dir.join(format!("{}.vtf", lut_filename));
                 let vmt_path = mat_output_dir.join(format!("{}.vmt", cluster_name));
 
-                if let Err(e) = generator::generate_vtf(&cluster, &vtf_path) {
+                // todo: cache template_materials and orig_vmt!
+                let mut orig_vmt = generator::find_and_process_vmt(game_dir, template_material.as_deref()).unwrap_or_else(|m| {
+                    error!("Failed to process VMT: {}", m);
+                    VmtParams::default()
+                });
+
+                orig_vmt.num_lights = cluster.lights.len() as f32;
+                // dbg!(&orig_vmt);
+
+                // todo: that's fucking bullshit!
+                if let Err(e) = generator::generate_vtf(&cluster, &vtf_path, orig_vmt) {
                     error!("Failed to create VTF for {}: {}", cluster_name, e);
                 }
 
@@ -430,7 +442,7 @@ pub fn process_map_pipeline(
                                 let start = add(origin_vec, mul(normal, -5.)); // todo
                                 debug!("  [UV Fix] Casting ray from {:?} dir {:?} (dist: {})", start, normal, UV_SEARCH_DIST);
                                 if let Some(hit) = tracer::trace_ray_closest(start, normal, UV_SEARCH_DIST, &world_brushes) {
-                                    debug!("    -> Hit world brush at dist {:.2}. Copying UVs.", hit.t);
+                                    debug!("    -> Hit world brush at dist {:.2} (brush id: {}). Copying UVs ({} | {}).", hit.t, hit.id, hit.u_axis, hit.v_axis);
                                     parent_uv = Some((hit.u_axis.to_string(), hit.v_axis.to_string()));
                                 } else {
                                     debug!("    -> No parent surface found within range.");

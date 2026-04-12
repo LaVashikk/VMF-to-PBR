@@ -5,3 +5,4 @@ pub mod processing;
 pub mod types;
 pub mod nut_gen;
 pub mod vtf_writer;
+pub mod vmt_helper;

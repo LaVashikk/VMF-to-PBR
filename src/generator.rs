@@ -10,7 +10,7 @@ use std::path::Path;
 pub const LUT_WIDTH: usize = 8;
 pub const LUT_HEIGHT: usize = 16;
 
-pub fn generate_vtf(cluster: &LightCluster, output_path: &Path) -> anyhow::Result<()> {
+pub fn generate_vtf(cluster: &LightCluster, output_path: &Path, params: VmtParams) -> anyhow::Result<()> {
     let num_lights = cluster.lights.len();
 
     // Ensure parent directory exists
@@ -19,7 +19,7 @@ pub fn generate_vtf(cluster: &LightCluster, output_path: &Path) -> anyhow::Resul
     }
 
     if num_lights > LUT_WIDTH {
-        warn!(
+        log::warn!(
             "Cluster '{}': More than {} lights provided ({}). Truncating.",
             cluster.name, LUT_WIDTH, num_lights
         );
@@ -111,6 +111,42 @@ pub fn generate_vtf(cluster: &LightCluster, output_path: &Path) -> anyhow::Resul
         }
     }
 
+    // --- WRITE GLOBAL PARAMS (ROW 8) ---
+    let params_row = 8;
+
+    // c0_data: x = RoughnessBias, y = DielectricF0, z = GlobalIntensity, w = UV_Scale
+    rgba_pixels[params_row * LUT_WIDTH + 0] = (
+        params.roughness_bias,
+        params.dielectric_f0,
+        params.global_intensity,
+        params.uv_scale,
+    );
+
+    // c1_data: Tintable (R, G, B, A)
+    rgba_pixels[params_row * LUT_WIDTH + 1] = (
+        params.albedo_tint[0],
+        params.albedo_tint[1],
+        params.albedo_tint[2],
+        params.albedo_tint[3],
+    );
+
+    // c2_data: x = FadeStart, y = FadeEnd, z = NumLights, w = UseCubemap
+    let use_cubemap_f32 = if params.use_cubemap { 1.0 } else { 0.0 };
+    rgba_pixels[params_row * LUT_WIDTH + 2] = (
+        params.fade_start,
+        params.fade_end,
+        params.num_lights,
+        use_cubemap_f32,
+    );
+
+    // c3_data: x = NormalStrength, y = ReflectionStrength, z = AO_Strength, w = MetalnessScale
+    rgba_pixels[params_row * LUT_WIDTH + 3] = (
+        params.normal_scale,
+        params.reflection_scale,
+        params.ao_scale,
+        params.metalness_scale,
+    );
+
     // --- WRITE PCC DATA (ROW 15) ---
     if let Some(pcc) = &cluster.pcc_volume {
         let row = 15;
@@ -142,6 +178,92 @@ pub fn generate_vtf(cluster: &LightCluster, output_path: &Path) -> anyhow::Resul
     crate::vtf_writer::write_rgba32f_vtf(&vtf_path, params, &raw_data)
 }
 
+#[derive(Debug, Clone)]
+pub struct VmtParams {
+    pub use_cubemap: bool,
+    pub reflection_scale: f32,
+    pub metalness_scale: f32,
+    pub roughness_bias: f32,
+    pub num_lights: f32,
+    pub uv_scale: f32,
+    pub ao_scale: f32,
+    pub global_intensity: f32,
+    pub dielectric_f0: f32,
+    pub normal_scale: f32,
+    pub fade_start: f32,
+    pub fade_end: f32,
+    pub albedo_tint: [f32; 4],
+}
+
+impl Default for VmtParams {
+    fn default() -> Self {
+        Self {
+            use_cubemap: false,
+            reflection_scale: 1.0,
+            metalness_scale: 1.0,
+            roughness_bias: 1.0,
+            num_lights: 0.0,
+            uv_scale: 1.0,
+            ao_scale: 1.0,
+            global_intensity: 1.0,
+            dielectric_f0: 0.04,
+            normal_scale: 1.0,
+            fade_start: 1024.0,
+            fade_end: 2048.0,
+            albedo_tint: [1.0, 1.0, 1.0, 1.0],
+        }
+    }
+}
+pub fn find_and_process_vmt(game_dir: &Path, base_material: Option<&str>) -> anyhow::Result<VmtParams> {
+    let options = FileSystemOptions::default();
+    let fs = match FileSystem::<DummyVpk>::load_from_path::<P2GameInfo>(game_dir, &options) {
+        Some(fs) => fs,
+        None => {
+            bail!("Failed to load filesystem. Check if gameinfo.txt exists");
+        }
+    };
+
+    let vmt_data = fs.read(
+        format!("materials/{}.vmt", base_material.context("Missing base_material")?).as_str(),
+        "game",
+        false
+    )
+    .map(|v| String::from_utf8_lossy(&v).to_string())
+    .context(format!("\"{}\" Not Found", base_material.unwrap()))?;
+
+    let content: crate::vmt_helper::Vmt = source_kv::from_str(&vmt_data)?;
+    let data = if content.shader == "patch" {
+        match content.properties.get("replace").context("Missing 'replace' block in patch VMT")? {
+            crate::vmt_helper::VmtValue::Block(block) => block,
+            _ => bail!("Unexpected value for 'replace' block in patch VMT"),
+        }
+    } else {
+        &content.properties
+    };
+
+    let parm = VmtParams {
+        use_cubemap: data.get("$UseCubemap").and_then(|v| v.as_bool()).unwrap_or_default(),
+        reflection_scale: data.get("$ReflectionScale").and_then(|v| v.as_float()).unwrap_or(1.0),
+        metalness_scale: data.get("$MetalnessScale").and_then(|v| v.as_float()).unwrap_or(1.0),
+        roughness_bias: data.get("$RoughnessBias").and_then(|v| v.as_float()).unwrap_or(1.0),
+        uv_scale: data.get("$UV_Scale").and_then(|v| v.as_float()).unwrap_or(1.0),
+        ao_scale: data.get("$AO_Scale").and_then(|v| v.as_float()).unwrap_or(1.0),
+        global_intensity: data.get("$GlobalIntensity").and_then(|v| v.as_float()).unwrap_or(1.0),
+        dielectric_f0: data.get("$DielectricF0").and_then(|v| v.as_float()).unwrap_or(0.04),
+        normal_scale: data.get("$NormalScale").and_then(|v| v.as_float()).unwrap_or(1.0),
+        fade_start: data.get("$FadeStart").and_then(|v| v.as_float()).unwrap_or(1024.0),
+        fade_end: data.get("$FadeEnd").and_then(|v| v.as_float()).unwrap_or(2048.0),
+        albedo_tint: [
+            data.get("$AlbedoTintR").and_then(|v| v.as_float()).unwrap_or(1.0),
+            data.get("$AlbedoTintG").and_then(|v| v.as_float()).unwrap_or(1.0),
+            data.get("$AlbedoTintB").and_then(|v| v.as_float()).unwrap_or(1.0),
+            data.get("$AlbedoTintRatio").and_then(|v| v.as_float()).unwrap_or(1.0),
+        ],
+        num_lights: 0.0,
+    };
+
+    Ok(parm)
+}
 
 /// Generates a Patch VMT that includes the base PBR shader and inserts the generated LUT
 pub fn generate_vmt(vmt_path: &Path, texture_rel_path: &str, base_material: Option<&str>, initial_c4: [f32; 4], surface_id: u64, cubemap_path: Option<&str>) -> anyhow::Result<()> {
