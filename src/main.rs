@@ -52,9 +52,22 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let map_name = args.input.file_stem()
+    let vmf_out = match args.output_vmf {
+        Some(p) => p,
+        None => {
+            let mut p = args.input.clone();
+            if let Some(stem) = p.file_stem() {
+                let new_stem = format!("{}_pbr", stem.to_string_lossy());
+                p.set_file_name(new_stem);
+            }
+            p.set_extension("vmf");
+            p
+        }
+    };
+
+    let map_name = vmf_out.file_stem()
         .and_then(|s| s.to_str())
-        .ok_or_else(|| anyhow::anyhow!("Invalid input filename"))?
+        .ok_or_else(|| anyhow::anyhow!("Invalid output filename"))?
         .to_string();
 
     let game_dir = args.game.unwrap_or_else(|| std::env::current_dir().unwrap());
@@ -124,7 +137,7 @@ fn main() -> anyhow::Result<()> {
     // Generate VScript Data
     let nut_path = game_dir
         .join("scripts/vscripts/_autogen_debug")
-        .join(format!("{}_pbr.nut", map_name));
+        .join(format!("{}.nut", map_name));
 
     if let Some(parent) = nut_path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -137,19 +150,6 @@ fn main() -> anyhow::Result<()> {
         warn!("Assets updated (Use --final to save modified VMF)");
         return Ok(());
     }
-
-    let vmf_out = match args.output_vmf {
-        Some(p) => p,
-        None => {
-            let mut p = args.input.clone();
-            if let Some(stem) = p.file_stem() {
-                let new_stem = format!("{}_pbr", stem.to_string_lossy());
-                p.set_file_name(new_stem);
-            }
-            p.set_extension("vmf");
-            p
-        }
-    };
 
     parser::strip_pbr_entities(&mut vmf);
     vmf.save(&vmf_out)?;
