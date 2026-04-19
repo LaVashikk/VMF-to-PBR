@@ -214,7 +214,7 @@ impl Default for VmtParams {
         }
     }
 }
-pub fn find_and_process_vmt(game_dir: &Path, base_material: Option<&str>) -> anyhow::Result<VmtParams> {
+pub fn find_and_process_vmt(game_dir: &Path, base_material: &str) -> anyhow::Result<VmtParams> {
     let options = FileSystemOptions::default();
     let fs = match FileSystem::<DummyVpk>::load_from_path::<P2GameInfo>(game_dir, &options) {
         Some(fs) => fs,
@@ -224,12 +224,12 @@ pub fn find_and_process_vmt(game_dir: &Path, base_material: Option<&str>) -> any
     };
 
     let vmt_data = fs.read(
-        format!("materials/{}.vmt", base_material.context("Missing base_material")?).as_str(),
+        format!("materials/{}.vmt", base_material).as_str(),
         "game",
         false
     )
     .map(|v| String::from_utf8_lossy(&v).to_string())
-    .context(format!("\"{}\" Not Found", base_material.unwrap()))?;
+    .context(format!("\"{}\" Not Found", base_material))?;
 
     let content: crate::vmt_helper::Vmt = source_kv::from_str(&vmt_data)?;
     let data = if content.shader == "patch" {
@@ -266,22 +266,17 @@ pub fn find_and_process_vmt(game_dir: &Path, base_material: Option<&str>) -> any
 }
 
 /// Generates a Patch VMT that includes the base PBR shader and inserts the generated LUT
-pub fn generate_vmt(vmt_path: &Path, texture_rel_path: &str, base_material: Option<&str>, initial_c4: [f32; 4], surface_id: u64, cubemap_path: Option<&str>) -> anyhow::Result<()> {
+pub fn generate_vmt(vmt_path: &Path, texture_rel_path: &str, pbr_material: &str, initial_c4: &[f32; 4], cubemap_path: Option<&str>) -> anyhow::Result<()> {
     if let Some(parent) = vmt_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
+    // TODO: now i have native VMT support, use it!
 
     let mut file = File::create(vmt_path)?;
-    let include_path = base_material.ok_or_else(|| {
-        anyhow::anyhow!(
-            "Missing 'template_material' in entity properties for {:?} (id: {}). This is required!",
-            vmt_path.file_stem().unwrap_or_default(), surface_id
-        )
-    })?;
 
     writeln!(file, "patch")?;
     writeln!(file, "{{")?;
-    writeln!(file, "\tinclude \"materials/{}.vmt\"", include_path)?;
+    writeln!(file, "\tinclude \"materials/{}.vmt\"", pbr_material)?;
     writeln!(file, "\treplace")?;
     writeln!(file, "\t{{")?;
 

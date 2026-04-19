@@ -1,4 +1,4 @@
-use crate::math::{dot, normalize, sub, Vec3, AABB};
+use crate::math::{Vec3, AABB};
 use crate::processing::geometry::ConvexBrush;
 use crate::processing::tracer;
 use crate::types::{LightDef, LightType};
@@ -15,7 +15,7 @@ pub fn calculate_score(
     world_brushes: &[ConvexBrush],
 ) -> f32 {
     let light_pos = light.pos;
-    debug!("Calculating score for light '{:?}' on surface with center {:?}", light.debug_id, surface_aabb.center);
+    debug!("Calculating score for light '{:?}' (id: {}) on surface with center {:?}", light.target_name, light.id, surface_aabb.center);
 
     // Quick distance test
     let dist_sq = crate::math::sq_dist_point_aabb(light_pos, surface_aabb);
@@ -29,7 +29,7 @@ pub fn calculate_score(
     // Shape Check (Spot / Rect Direction)
     if !check_shape_visibility(light, surface_aabb) {
         if light.is_named_light {
-             debug!("  > Named light '{}' culled by shape. (Closest Dist: {:.1})", light.debug_id, dist);
+             debug!("  > Named light '{}' (id: {}) culled by shape. (Closest Dist: {:.1})", light.target_name, light.id, dist);
         }
         return 0.0;
     }
@@ -46,8 +46,8 @@ pub fn calculate_score(
 
     // Estimated surface brightness (no way)
     let estimated_brightness = light.intensity * attenuation * window_sq;
-    if estimated_brightness < 0.5 {
-        debug!("  > Culled by estimated_brightness ({} < 0.5)", estimated_brightness);
+    if estimated_brightness < 0.001 { // todo: think about it a bit more.. im not sure rn
+        debug!("  > Culled by estimated_brightness ({} < 0.001)", estimated_brightness);
         return 0.0;
     }
 
@@ -74,8 +74,8 @@ pub fn calculate_score(
     // Final Score
     let score = estimated_brightness * visibility_factor;
 
-    debug!("  > Light {} ({}) | Brightness: {:.2} | Vis: {:.2} | Score: {:.2}",
-           light.debug_id, light.light_type.name(), estimated_brightness, visibility_factor, score);
+    debug!("  > Light {} (id: {}, type: {}) | Brightness: {:.2} | Vis: {:.2} | Score: {:.2}",
+           light.target_name, light.id, light.light_type.name(), estimated_brightness, visibility_factor, score);
 
     score
 }
@@ -86,7 +86,7 @@ fn check_shape_visibility(light: &LightDef, aabb: &AABB) -> bool {
 
     match &light.light_type {
         LightType::Spot { direction, outer_angle, .. } => {
-            let light_dir = normalize(*direction);
+            let light_dir = direction.normalize();
 
             // Expand the angle by the tolerance constant
             // outer_angle in Source is the full opening angle, so divide by 2

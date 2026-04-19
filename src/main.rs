@@ -2,8 +2,8 @@ use anyhow::Ok;
 use clap::Parser;
 use log::{info, warn, error};
 use simplelog::{LevelFilter, SimpleLogger};
-use std::path::PathBuf;
-use vmf_forge::prelude::VmfFile;
+use std::{collections::HashMap, path::PathBuf};
+use vmf_forge::prelude::{Entities, Entity, Solid, VmfFile};
 use pbr_lut_gen::*;
 
 #[derive(Parser, Debug)]
@@ -103,10 +103,15 @@ fn main() -> anyhow::Result<()> {
     if args.dump_clusters {
         warn!("Dumping clusters and their scores:");
         for cluster in &clusters {
-            println!("---\nCluster: {}", cluster.name);
+            println!("---\nCluster: '{}'", cluster.name);
+            println!("   Coordinated: {}", cluster.bound.center);
+            println!("   PBR Material: {:?}", cluster.pbr_material);
+            println!("   LUT Data Material: {:?}", cluster.surface_material_path.display());
+            println!("   GGX_SURFACE entity: {:?} (hammer id: {})", cluster.ggx_surface_name, cluster.ggx_surface_id);
             println!("   Min Score Threshold: {:.4}", cluster.min_cluster_score);
+            println!("   Cubemap Name: {:?}", cluster.cubemap_name.as_deref().unwrap_or("None"));
 
-            println!("   [ACCEPTED] (Count: {})", cluster.lights.len());
+            println!("   [ACCEPTED LIGHTS] (Count: {})", cluster.lights.len());
             for (light, score) in &cluster.lights {
                 let score_str = if *score > 10000.0 {
                     "FORCE".to_string()
@@ -114,16 +119,16 @@ fn main() -> anyhow::Result<()> {
                     format!("{:.4}", score)
                 };
 
-                println!("     + {:<25} | Score: {}", light.debug_id, score_str);
+                println!("     + {:<25} | Score: {}", light.id, score_str);
             }
 
             if !cluster.rejected_lights.is_empty() {
-                println!("   [REJECTED] (Count: {})", cluster.rejected_lights.len());
+                println!("   [REJECTED LIGHTS] (Count: {})", cluster.rejected_lights.len());
                 for (light, score) in &cluster.rejected_lights {
-                    println!("     - {:<25} | Score: {:.4}", light.debug_id, score);
+                    println!("     - {:<25} | Score: {:.4}", light.id, score);
                 }
             } else {
-                println!("   [REJECTED] (None)");
+                println!("   [REJECTED LIGHTS] (None)");
             }
         }
         println!("----------------------------------------------");

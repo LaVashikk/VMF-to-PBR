@@ -46,8 +46,12 @@ impl LightType {
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub struct LightDef {
-    pub debug_id: String,
+    // TODO: should I save Entity itself?
+    pub id: u64,
+    pub target_name: String,
+    pub pbr_name: String,
     pub is_named_light: bool,
+
     pub light_type: LightType,
     pub pos: Vec3,
     pub color: Vec3,
@@ -56,6 +60,7 @@ pub struct LightDef {
     pub attenuation_k: f32,
     pub fifty_percent_distance: Option<f32>,
     pub blockers: [Option<BlockerDef>; MAX_BLOCKERS],
+
     /// If true, the light is turned off at map start (spawnflags & 1)
     pub initially_dark: bool,
 }
@@ -71,11 +76,21 @@ pub struct ParallaxVolume {
 /// This will be baked into a single Nx16 LUT texture.
 #[derive(Debug)]
 pub struct LightCluster {
-    pub name: String,
-    pub lights: Vec<(LightDef, f32)>,
-    pub material: String,
+    pub solid: Arc<RwLock<GgxSolid>>,
+    pub ggx_surface_name: String,
+    pub ggx_surface_id: u64,
+    pub ggx_surface_origin: Vec3,
 
-    pub bounds: crate::math::AABB,
+    pub name: String,
+    pub bound: AABB,
+    pub lights: Vec<(LightDef, f32)>,
+    // Initial values for register c4, controlling brightness of the first 4 toggleable named lights
+    pub initial_c4: [f32; 4],
+
+    pub pbr_material: String,
+    pub surface_material: String,
+    pub surface_material_path: PathBuf,
+
     pub min_cluster_score: f32,
     pub rejected_lights: Vec<(LightDef, f32)>,
 
