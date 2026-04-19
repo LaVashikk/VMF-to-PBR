@@ -1,4 +1,4 @@
-use crate::math::{dot, sub, Vec3, AABB};
+use crate::math::{Vec3, AABB};
 use crate::processing::geometry::ConvexBrush;
 use log::debug;
 
@@ -14,8 +14,8 @@ pub struct RayHit<'a> {
 /// Checks whether the path from `start` to `end` is blocked by the `brushes` geometry.
 /// Returns true if the path is blocked (i.e., there is a shadow)
 pub fn is_occluded(start: Vec3, end: Vec3, brushes: &[ConvexBrush]) -> bool {
-    let diff = sub(end, start);
-    let dist_sq = dot(diff, diff);
+    let diff = end - start;
+    let dist_sq = diff.dot(diff);
     let dist = dist_sq.sqrt();
 
     // If the points match, there is no overlap
@@ -23,7 +23,7 @@ pub fn is_occluded(start: Vec3, end: Vec3, brushes: &[ConvexBrush]) -> bool {
         return false;
     }
 
-    let dir = [diff[0] / dist, diff[1] / dist, diff[2] / dist];
+    let dir = Vec3::new(diff[0] / dist, diff[1] / dist, diff[2] / dist);
 
     for brush in brushes.iter() {
         // Broad Phase AABB Check
@@ -115,8 +115,8 @@ fn intersect_brush(origin: Vec3, dir: Vec3, max_dist: f32, brush: &ConvexBrush) 
             continue;
         }
 
-        let numer = -(dot(plane.normal, origin) + plane.dist);
-        let denom = dot(plane.normal, dir);
+        let numer = -(plane.normal.dot(origin) + plane.dist);
+        let denom = plane.normal.dot(dir);
 
         if denom.abs() < 1e-6 {
             if numer < 0.0 { return None; }
@@ -157,21 +157,21 @@ mod tests {
         // For wall X=size: N=(1,0,0). Point P=(size,0,0). 1*size + d = 0 => d = -size.
 
         // +X
-        planes.push(Plane::new([1.0, 0.0, 0.0], -size));
+        planes.push(Plane::new(Vec3::new(1.0, 0.0, 0.0), -size));
         // -X
-        planes.push(Plane::new([-1.0, 0.0, 0.0], -size));
+        planes.push(Plane::new(Vec3::new(-1.0, 0.0, 0.0), -size));
         // +Y
-        planes.push(Plane::new([0.0, 1.0, 0.0], -size));
+        planes.push(Plane::new(Vec3::new(0.0, 1.0, 0.0), -size));
         // -Y
-        planes.push(Plane::new([0.0, -1.0, 0.0], -size));
+        planes.push(Plane::new(Vec3::new(0.0, -1.0, 0.0), -size));
         // +Z
-        planes.push(Plane::new([0.0, 0.0, 1.0], -size));
+        planes.push(Plane::new(Vec3::new(0.0, 0.0, 1.0), -size));
         // -Z
-        planes.push(Plane::new([0.0, 0.0, -1.0], -size));
+        planes.push(Plane::new(Vec3::new(0.0, 0.0, -1.0), -size));
 
         let mut _bounds = AABB::new();
-        _bounds.extend([-size, -size, -size]);
-        _bounds.extend([size, size, size]);
+        _bounds.extend(Vec3::new(-size, -size, -size));
+        _bounds.extend(Vec3::new(size, size, size));
 
         ConvexBrush { planes, _bounds, id: 0 }
     }
@@ -183,8 +183,8 @@ mod tests {
         let world = vec![cube];
 
         // Ray through the cube: from -20 to +20 along X
-        let start = [-20.0, 0.0, 0.0];
-        let end = [20.0, 0.0, 0.0];
+        let start = Vec3::new(-20.0, 0.0, 0.0);
+        let end = Vec3::new(20.0, 0.0, 0.0);
 
         // Should be occluded
         assert!(is_occluded(start, end, &world), "Ray through cube center should be occluded");
@@ -196,8 +196,8 @@ mod tests {
         let world = vec![cube];
 
         // Ray from the side: from -20 to +20, but Y=15 (misses the cube)
-        let start = [-20.0, 15.0, 0.0];
-        let end = [20.0, 15.0, 0.0];
+        let start = Vec3::new(-20.0, 15.0, 0.0);
+        let end = Vec3::new(20.0, 15.0, 0.0);
 
         assert!(!is_occluded(start, end, &world), "Ray passing by the side should NOT be occluded");
     }
@@ -209,8 +209,8 @@ mod tests {
 
         // Ray directed at the wall but does not reach it
         // Wall starts at X=-10. Ray from -30 to -15.
-        let start = [-30.0, 0.0, 0.0];
-        let end = [-15.0, 0.0, 0.0];
+        let start = Vec3::new(-30.0, 0.0, 0.0);
+        let end = Vec3::new(-15.0, 0.0, 0.0);
 
         assert!(!is_occluded(start, end, &world), "Short ray before wall should NOT be occluded");
     }
@@ -230,8 +230,8 @@ mod tests {
         // So is_occluded will likely return false, which is logical (light is not occluded by "entry").
 
         // Let's check shooting through from inside.
-        let start = [0.0, 0.0, 0.0];
-        let end = [20.0, 0.0, 0.0];
+        let start = Vec3::new(0.0, 0.0, 0.0);
+        let end = Vec3::new(20.0, 0.0, 0.0);
 
         // In the current Slab method implementation for a convex volume, if Origin is inside,
         // t_near will remain 0.0 (or negative), and t_far will be positive.
@@ -248,8 +248,8 @@ mod tests {
         let world = vec![cube];
 
         // Ray runs parallel to the face, but slightly above (Y=10.001)
-        let start = [-20.0, 10.1, 0.0];
-        let end = [20.0, 10.1, 0.0];
+        let start = Vec3::new(-20.0, 10.1, 0.0);
+        let end = Vec3::new(20.0, 10.1, 0.0);
 
         assert!(!is_occluded(start, end, &world), "Grazing ray should miss");
     }
@@ -260,8 +260,8 @@ mod tests {
         let world = vec![cube];
 
         // Ray starts on the surface (X=-10) and goes outward (towards -X)
-        let start = [-10.0, 0.0, 0.0];
-        let end = [-20.0, 0.0, 0.0];
+        let start = Vec3::new(-10.0, 0.0, 0.0);
+        let end = Vec3::new(-20.0, 0.0, 0.0);
 
         // Such a ray should NOT be considered occluded
         assert!(!is_occluded(start, end, &world), "Ray starting on surface and moving away should NOT be occluded");

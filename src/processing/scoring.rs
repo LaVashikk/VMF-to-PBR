@@ -94,12 +94,12 @@ fn check_shape_visibility(light: &LightDef, aabb: &AABB) -> bool {
             let limit_cos = effective_angle_deg.to_radians().cos();
 
             for point in points.iter() {
-                let to_target = sub(*point, light.pos);
-                let dist = dot(to_target, to_target).sqrt();
+                let to_target = *point - light.pos;
+                let dist = to_target.dot(to_target).sqrt();
                 if dist < 0.1 { return true; }
 
-                let dir_to_target = [to_target[0]/dist, to_target[1]/dist, to_target[2]/dist];
-                let cos_angle = dot(light_dir, dir_to_target);
+                let dir_to_target = Vec3::new(to_target.0 / dist, to_target.1 / dist, to_target.2 / dist);
+                let cos_angle = light_dir.dot(dir_to_target);
 
                 if cos_angle >= limit_cos {
                     return true;
@@ -109,14 +109,14 @@ fn check_shape_visibility(light: &LightDef, aabb: &AABB) -> bool {
         },
         LightType::Rect { direction, bidirectional, .. } => {
             if !bidirectional {
-                let light_dir = normalize(*direction);
+                let light_dir = direction.normalize();
                 for point in points {
-                    let to_target = sub(point, light.pos);
-                    let dist = dot(to_target, to_target).sqrt();
+                    let to_target = point - light.pos;
+                    let dist = to_target.dot(to_target).sqrt();
                     if dist < 0.1 { return true; }
 
-                    let dir_to_target = [to_target[0]/dist, to_target[1]/dist, to_target[2]/dist];
-                    if dot(light_dir, dir_to_target) >= -0.1 {
+                    let dir_to_target = Vec3::new(to_target.0 / dist, to_target.1 / dist, to_target.2 / dist);
+                    if light_dir.dot(dir_to_target) >= -0.1 {
                         return true;
                     }
                 }
@@ -134,15 +134,15 @@ fn get_sample_points(aabb: &AABB, target_pos: Vec3) -> Vec<Vec3> {
     points.push(aabb.center);
 
     // Corners
-    points.push([aabb.min[0], aabb.min[1], aabb.min[2]]);
-    points.push([aabb.max[0], aabb.min[1], aabb.min[2]]);
-    points.push([aabb.min[0], aabb.max[1], aabb.min[2]]);
-    points.push([aabb.max[0], aabb.max[1], aabb.min[2]]);
+    points.push(Vec3::new(aabb.min[0], aabb.min[1], aabb.min[2]));
+    points.push(Vec3::new(aabb.max[0], aabb.min[1], aabb.min[2]));
+    points.push(Vec3::new(aabb.min[0], aabb.max[1], aabb.min[2]));
+    points.push(Vec3::new(aabb.max[0], aabb.max[1], aabb.min[2]));
 
-    points.push([aabb.min[0], aabb.min[1], aabb.max[2]]);
-    points.push([aabb.max[0], aabb.min[1], aabb.max[2]]);
-    points.push([aabb.min[0], aabb.max[1], aabb.max[2]]);
-    points.push([aabb.max[0], aabb.max[1], aabb.max[2]]);
+    points.push(Vec3::new(aabb.min[0], aabb.min[1], aabb.max[2]));
+    points.push(Vec3::new(aabb.max[0], aabb.min[1], aabb.max[2]));
+    points.push(Vec3::new(aabb.min[0], aabb.max[1], aabb.max[2]));
+    points.push(Vec3::new(aabb.max[0], aabb.max[1], aabb.max[2]));
 
     // todo: sooo, to avoid taking points that might be "under the wall", it's doubtful for now, but.. ok?
     let inset = 1.0;
@@ -158,11 +158,11 @@ fn get_sample_points(aabb: &AABB, target_pos: Vec3) -> Vec<Vec3> {
     ];
 
     // Closest Point on AABB to Light
-    let closest = [
+    let closest = Vec3::new(
         target_pos[0].clamp(min[0], max[0]),
         target_pos[1].clamp(min[1], max[1]),
         target_pos[2].clamp(min[2], max[2]),
-    ];
+    );
     points.push(closest);
 
     points

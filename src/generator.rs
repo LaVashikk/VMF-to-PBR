@@ -1,5 +1,5 @@
-use crate::math::{cross, dot, normalize, sub};
 use source_fs::{DummyVpk, FileSystem, FileSystemOptions, P2GameInfo};
+use crate::math::Vec3;
 use crate::types::{LightCluster, LightType};
 use anyhow::{Context, bail};
 use std::fs::File;
@@ -29,7 +29,7 @@ pub fn generate_vtf(cluster: &LightCluster, output_path: &Path, params: VmtParam
     let mut rgba_pixels = vec![(0.0_f32, 0.0_f32, 0.0_f32, 1.0_f32); LUT_WIDTH * LUT_HEIGHT];
 
     for (i, (light, _score)) in cluster.lights.iter().take(LUT_WIDTH).enumerate() {
-        let mut dir = [0.0, 0.0, 0.0];
+        let mut dir = Vec3::ZERO;
         let mut param1 = 0.0;
         let mut param2 = 0.0;
         let mut extra_param = 0.0;
@@ -91,18 +91,18 @@ pub fn generate_vtf(cluster: &LightCluster, output_path: &Path, params: VmtParam
 
             // Blocker Offset
             let blocker_world_pos = b.pos.unwrap_or(light.pos);
-            let diff = sub(blocker_world_pos, light.pos);
+            let diff = blocker_world_pos - light.pos;
 
             if is_fizzler {
                 // Project offset to light local space for Fizzlers
-                let light_dir = normalize(dir);
-                let up_base = if light_dir[2].abs() > 0.99 { [1.0, 0.0, 0.0] } else { [0.0, 0.0, 1.0] };
-                let right = normalize(cross(light_dir, up_base));
-                let up = cross(right, light_dir);
+                let light_dir = dir.normalize();
+                let up_base = if light_dir[2].abs() > 0.99 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 0.0, 1.0) };
+                let right = light_dir.cross(up_base).normalize();
+                let up = right.cross(light_dir).normalize();
 
-                let off_x = dot(diff, right);
-                let off_y = dot(diff, up);
-                let off_z = dot(diff, light_dir);
+                let off_x = diff.dot(right);
+                let off_y = diff.dot(up);
+                let off_z = diff.dot(light_dir);
                 rgba_pixels[(base_row + 1) * LUT_WIDTH + i] = (off_x, off_y, off_z, 0.0);
             } else {
                 // World space offset

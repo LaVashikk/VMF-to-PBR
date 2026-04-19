@@ -1,4 +1,4 @@
-use crate::{math::{dot, mul, Vec3, AABB}, processing::utils};
+use crate::{math::{Vec3, AABB}, processing::utils};
 use log::{debug, warn};
 use vmf_forge::prelude::{Entity, Solid};
 
@@ -63,8 +63,8 @@ impl ConvexBrush {
             valid_points_found = true;
 
             // Calculate the plane normal
-            let n = mul(utils::calc_face_normal(points), -1.0); // todo haha
-            let d = -dot(n, points[0]);
+            let n = utils::calc_face_normal(points) * -1.0; // todo haha
+            let d = -n.dot(points[0]);
 
             planes.push(Plane {
                 normal: n,
@@ -105,6 +105,25 @@ pub fn get_entity_aabb(ent: &Entity) -> Option<AABB> {
                 }
                 found = true;
             }
+        }
+    }
+
+    if !found { return None; }
+    Some(aabb)
+}
+
+// todo!!!!!!!!!!! DRY
+pub fn get_solid_aabb(solid: &Solid) -> Option<AABB> {
+    // Re-use logic from ConvexBrush parsing but for AABB
+    let mut aabb = AABB::new();
+    let mut found = false;
+
+    for side in solid.sides.iter() {
+        if let Some(points) = super::utils::parse_plane_points(&side.plane) {
+            for p in points {
+                aabb.extend(p);
+            }
+            found = true;
         }
     }
 

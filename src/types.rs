@@ -1,3 +1,9 @@
+use std::{path::PathBuf, sync::{Arc, RwLock}};
+
+use vmf_forge::prelude::Solid;
+
+use crate::{math::{AABB, Vec3}, processing::{GgxSolid, GgxSurfaceEnt}};
+
 const MAX_BLOCKERS: usize = 2;
 
 #[derive(Debug, Clone)]
@@ -6,7 +12,7 @@ pub struct BlockerDef {
     pub height: f32,
     pub depth: f32,
     // Center position of the blocker in the world
-    pub pos: Option<[f32; 3]>,
+    pub pos: Option<Vec3>,
     pub flag: u8,
 }
 
@@ -14,13 +20,13 @@ pub struct BlockerDef {
 pub enum LightType {
     Point,
     Spot {
-        direction: [f32; 3],
+        direction: Vec3,
         inner_angle: f32,
         outer_angle: f32,
         exponent: f32,
     },
     Rect {
-        direction: [f32; 3],
+        direction: Vec3,
         width: f32,
         height: f32,
         bidirectional: bool,
@@ -43,8 +49,8 @@ pub struct LightDef {
     pub debug_id: String,
     pub is_named_light: bool,
     pub light_type: LightType,
-    pub pos: [f32; 3],
-    pub color: [f32; 3],
+    pub pos: Vec3,
+    pub color: Vec3,
     pub intensity: f32,
     pub range: f32,
     pub attenuation_k: f32,
@@ -56,9 +62,9 @@ pub struct LightDef {
 
 #[derive(Debug, Clone)]
 pub struct ParallaxVolume {
-    pub cubemap_pos: [f32; 3], // World space position of the selected env_cubemap
-    pub ws_min: [f32; 3],      // World space AABB Min of the volume
-    pub ws_max: [f32; 3],      // World space AABB Max of the volume
+    pub cubemap_pos: Vec3, // World space position of the selected env_cubemap
+    pub ws_min: Vec3,      // World space AABB Min of the volume
+    pub ws_max: Vec3,      // World space AABB Max of the volume
 }
 
 /// Represents a collection of lights assigned to a specific surface/material.

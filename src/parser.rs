@@ -1,4 +1,4 @@
-use crate::math::{cross, dot, normalize, parse_vector, sub, Vec3};
+use crate::math::Vec3;
 use crate::processing::geometry::get_entity_aabb;
 use crate::types::{BlockerDef, LightDef, LightType};
 use std::collections::HashMap;
@@ -35,7 +35,7 @@ pub fn extract_lights(vmf: &VmfFile) -> anyhow::Result<Vec<LightDef>> {
             }
 
             // == PHASE 1: BASIC PROPERTIES
-            let origin_vec = parse_vector(ent.get("origin").unwrap_or(&"0 0 0".to_string()));
+            let origin_vec = Vec3::parse(ent.get("origin").unwrap_or(&"0 0 0".to_string()));
             let light_val = ent.get("_light").map(|v| v.as_str()).unwrap_or("255 255 255 200");
             let (mut color, raw_intensity_val) = parse_color_intensity(light_val);
 
@@ -69,17 +69,19 @@ pub fn extract_lights(vmf: &VmfFile) -> anyhow::Result<Vec<LightDef>> {
 
                 if let Some(aabb) = get_entity_aabb(ent) {
                     final_pos = aabb.center;
-                    let extent = sub(aabb.max, aabb.min); // Dimensions vector (dx, dy, dz)
+                    let extent = aabb.max - aabb.min; // Dimensions vector (dx, dy, dz)
 
                     // Reconstruct Shader Basis
-                    let fwd = normalize(dir);
-                    let up_base = if fwd[2].abs() > 0.99 { [1.0, 0.0, 0.0] } else { [0.0, 0.0, 1.0] };
-                    let right_vec = normalize(cross(fwd, up_base));
-                    let up_vec = normalize(cross(right_vec, fwd));
+                    let fwd = dir.normalize();
+                    let up_base = if fwd[2].abs() > 0.99 { Vec3::new(1.0, 0.0, 0.0) } else { Vec3::new(0.0, 0.0, 1.0) };
+                    let right_vec = fwd.cross(up_base).normalize();
+                    let up_vec = right_vec.cross(fwd).normalize();
 
                     // Project dimensions onto basis
-                    width = dot(extent, [right_vec[0].abs(), right_vec[1].abs(), right_vec[2].abs()]).abs();
-                    height = dot(extent, [up_vec[0].abs(), up_vec[1].abs(), up_vec[2].abs()]).abs();
+                    let abs_right_vec = Vec3::new(right_vec[0].abs(), right_vec[1].abs(), right_vec[2].abs());
+                    let abs_up_vec = Vec3::new(up_vec[0].abs(), up_vec[1].abs(), up_vec[2].abs());
+                    width = extent.dot(abs_right_vec);
+                    height = extent.dot(abs_up_vec).abs();
 
                     if width < 1.0 { width = 1.0; }
                     if height < 1.0 { height = 1.0; }
@@ -89,7 +91,7 @@ pub fn extract_lights(vmf: &VmfFile) -> anyhow::Result<Vec<LightDef>> {
                 // This prevents the excessive range and "infinite" falloff behavior of the original area light formula.
                 let c = 0.0;
                 let l = 0.0;
-                let q = 1.0; 
+                let q = 1.0;
 
                 let ratio = c + (100.0 * l) + (10000.0 * q);
                 let src_energy = if ratio > 0.001 { intensity * ratio } else { 0.0 };
@@ -207,12 +209,14 @@ pub fn extract_lights(vmf: &VmfFile) -> anyhow::Result<Vec<LightDef>> {
             // == PHASE 4: FINALIZEE
             let spawnflags = ent.get("spawnflags").and_then(|s| s.parse::<u32>().ok()).unwrap_or(0);
             let initially_dark = (spawnflags & 1) != 0;
-            let targetname = ent.targetname() // todo i dont like this shit!
-                .map(sanitize_name)
-                .unwrap_or_else(|| ent.id().to_string());
+            let targetname = ent.targetname().unwrap_or_default().to_string();
+            let pbr_name = format!("light_{}", ent.id()); // tODO: think, mark, think!
+
 
             lights.push(LightDef {
-                debug_id: targetname, // todo: rename
+                id: ent.id(),
+                target_name: targetname,
+                pbr_name,
                 is_named_light: ent.targetname().is_some(),
                 light_type,
                 pos: final_pos,
@@ -239,20 +243,20 @@ pub fn strip_pbr_entities(vmf: &mut VmfFile) {
 }
 
 /// Helper: Parse Source "_light" string
-fn parse_color_intensity(s: &str) -> ([f32; 3], f32) {
+fn parse_color_intensity(s: &str) -> (Vec3, f32) {
     let parts: Vec<f32> = s.split_whitespace().filter_map(|v| v.parse().ok()).collect();
     if parts.len() >= 4 {
         (
-            [parts[0] / 255.0, parts[1] / 255.0, parts[2] / 255.0],
+            Vec3::new(parts[0] / 255.0, parts[1] / 255.0, parts[2] / 255.0),
             parts[3],
         )
     } else if parts.len() == 3 {
         (
-            [parts[0] / 255.0, parts[1] / 255.0, parts[2] / 255.0],
+            Vec3::new(parts[0] / 255.0, parts[1] / 255.0, parts[2] / 255.0),
             200.0,
         )
     } else {
-        ([1.0, 1.0, 1.0], 200.0)
+        (Vec3::ONE, 200.0)
     }
 }
 
@@ -264,7 +268,7 @@ pub fn sanitize_name(string: &str) -> String {
 
 /// Helper: Convert Source angles to Vector
 fn angles_to_dir(angles_str: &str, pitch_override: Option<&str>) -> Vec3 {
-    let parts = parse_vector(angles_str);
+    let parts = Vec3::parse(angles_str);
     let mut pitch = parts[0];
     let yaw = parts[1];
 
@@ -287,5 +291,5 @@ fn angles_to_dir(angles_str: &str, pitch_override: Option<&str>) -> Vec3 {
     let z = p_rad.sin();
 
     let clean = |v: f32| if v.abs() < 1e-4 { 0.0 } else { v };
-    [clean(x), clean(y), clean(z)]
+    Vec3::new(clean(x), clean(y), clean(z))
 }
