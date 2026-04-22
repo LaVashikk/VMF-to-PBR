@@ -1,6 +1,7 @@
 use source_fs::{DummyVpk, FileSystem, FileSystemOptions, P2GameInfo};
 use crate::math::Vec3;
 use crate::types::{LightCluster, LightType};
+use crate::vmt_helper::VmtPbrParams;
 use anyhow::{Context, bail};
 use std::fs::File;
 use std::io::Write;
@@ -10,7 +11,7 @@ use std::path::Path;
 pub const LUT_WIDTH: usize = 8;
 pub const LUT_HEIGHT: usize = 16;
 
-pub fn generate_vtf(cluster: &LightCluster, output_path: &Path, params: VmtParams) -> anyhow::Result<()> {
+pub fn generate_vtf(cluster: &LightCluster, output_path: &Path, params: &VmtPbrParams) -> anyhow::Result<()> {
     let num_lights = cluster.lights.len();
 
     // Ensure parent directory exists
@@ -178,43 +179,7 @@ pub fn generate_vtf(cluster: &LightCluster, output_path: &Path, params: VmtParam
     crate::vtf_writer::write_rgba32f_vtf(&vtf_path, params, &raw_data)
 }
 
-#[derive(Debug, Clone)]
-pub struct VmtParams {
-    pub use_cubemap: bool,
-    pub reflection_scale: f32,
-    pub metalness_scale: f32,
-    pub roughness_bias: f32,
-    pub num_lights: f32,
-    pub uv_scale: f32,
-    pub ao_scale: f32,
-    pub global_intensity: f32,
-    pub dielectric_f0: f32,
-    pub normal_scale: f32,
-    pub fade_start: f32,
-    pub fade_end: f32,
-    pub albedo_tint: [f32; 4],
-}
-
-impl Default for VmtParams {
-    fn default() -> Self {
-        Self {
-            use_cubemap: false,
-            reflection_scale: 1.0,
-            metalness_scale: 1.0,
-            roughness_bias: 1.0,
-            num_lights: 0.0,
-            uv_scale: 1.0,
-            ao_scale: 1.0,
-            global_intensity: 1.0,
-            dielectric_f0: 0.04,
-            normal_scale: 1.0,
-            fade_start: 1024.0,
-            fade_end: 2048.0,
-            albedo_tint: [1.0, 1.0, 1.0, 1.0],
-        }
-    }
-}
-pub fn find_and_process_vmt(game_dir: &Path, base_material: &str) -> anyhow::Result<VmtParams> {
+pub fn find_and_process_vmt(game_dir: &Path, base_material: &str) -> anyhow::Result<VmtPbrParams> {
     let options = FileSystemOptions::default();
     let fs = match FileSystem::<DummyVpk>::load_from_path::<P2GameInfo>(game_dir, &options) {
         Some(fs) => fs,
@@ -231,42 +196,11 @@ pub fn find_and_process_vmt(game_dir: &Path, base_material: &str) -> anyhow::Res
     .map(|v| String::from_utf8_lossy(&v).to_string())
     .context(format!("\"{}\" Not Found", base_material))?;
 
-    let content: crate::vmt_helper::Vmt = source_kv::from_str(&vmt_data)?;
-    let data = if content.shader == "patch" {
-        match content.properties.get("replace").context("Missing 'replace' block in patch VMT")? {
-            crate::vmt_helper::VmtValue::Block(block) => block,
-            _ => bail!("Unexpected value for 'replace' block in patch VMT"),
-        }
-    } else {
-        &content.properties
-    };
-
-    let parm = VmtParams {
-        use_cubemap: data.get("$UseCubemap").and_then(|v| v.as_bool()).unwrap_or_default(),
-        reflection_scale: data.get("$ReflectionScale").and_then(|v| v.as_float()).unwrap_or(1.0),
-        metalness_scale: data.get("$MetalnessScale").and_then(|v| v.as_float()).unwrap_or(1.0),
-        roughness_bias: data.get("$RoughnessBias").and_then(|v| v.as_float()).unwrap_or(1.0),
-        uv_scale: data.get("$UV_Scale").and_then(|v| v.as_float()).unwrap_or(1.0),
-        ao_scale: data.get("$AO_Scale").and_then(|v| v.as_float()).unwrap_or(1.0),
-        global_intensity: data.get("$GlobalIntensity").and_then(|v| v.as_float()).unwrap_or(1.0),
-        dielectric_f0: data.get("$DielectricF0").and_then(|v| v.as_float()).unwrap_or(0.04),
-        normal_scale: data.get("$NormalScale").and_then(|v| v.as_float()).unwrap_or(1.0),
-        fade_start: data.get("$FadeStart").and_then(|v| v.as_float()).unwrap_or(1024.0),
-        fade_end: data.get("$FadeEnd").and_then(|v| v.as_float()).unwrap_or(2048.0),
-        albedo_tint: [
-            data.get("$AlbedoTintR").and_then(|v| v.as_float()).unwrap_or(1.0),
-            data.get("$AlbedoTintG").and_then(|v| v.as_float()).unwrap_or(1.0),
-            data.get("$AlbedoTintB").and_then(|v| v.as_float()).unwrap_or(1.0),
-            data.get("$AlbedoTintRatio").and_then(|v| v.as_float()).unwrap_or(1.0),
-        ],
-        num_lights: 0.0,
-    };
-
-    Ok(parm)
+    VmtPbrParams::parse_from_vmt(&vmt_data)
 }
 
 /// Generates a Patch VMT that includes the base PBR shader and inserts the generated LUT
-pub fn generate_vmt(vmt_path: &Path, texture_rel_path: &str, pbr_material: &str, initial_c4: &[f32; 4], cubemap_path: Option<&str>) -> anyhow::Result<()> {
+pub fn generate_vmt(vmt_path: &Path, texture_rel_path: &str, params: &VmtPbrParams, initial_c4: &[f32; 4], cubemap_path: Option<&str>) -> anyhow::Result<()> {
     if let Some(parent) = vmt_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -276,18 +210,23 @@ pub fn generate_vmt(vmt_path: &Path, texture_rel_path: &str, pbr_material: &str,
 
     writeln!(file, "patch")?;
     writeln!(file, "{{")?;
-    writeln!(file, "\tinclude \"materials/{}.vmt\"", pbr_material)?;
+    writeln!(file, "\tinclude \"materials/{}.vmt\"", params.pbr_shader_template)?; // preprocess materials/vmt path
     writeln!(file, "\treplace")?;
     writeln!(file, "\t{{")?;
 
     // Normalize path separators to forward slashes for Source Engine
     let clean_path = texture_rel_path.replace('\\', "/");
+    writeln!(file, "\t\t$basetexture \"{}\"", params.bump_map)?;
     writeln!(file, "\t\t$texture1 \"{}\"", clean_path)?;
 
     // Inject Cubemap if available
-    if let Some(cpath) = cubemap_path {
+    if let Some(env_map) = params.env_map.as_ref() {
+        writeln!(file, "\t\t$texture2 \"{}\"", env_map)?;
+    } else if let Some(cpath) = cubemap_path {
         writeln!(file, "\t\t$texture2 \"{}\"", cpath)?;
     }
+
+    writeln!(file, "\t\t$texture3 \"{}\"", params.mrao_map)?;
 
 
     // Write $c4 vector based on light initial state

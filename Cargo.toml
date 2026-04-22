@@ -10,10 +10,15 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 exr = "1.7"
 vmf-forge = "0.4.1"
-regex = "1.10"
+regex = "1.10" # todo: OUTDATED! Now i have source-kv reader yo
+
 log = "0.4.28"
 simplelog = "0.12.2"
+
 byteorder = "1.5.0"
-// TODO: temp
-source-fs = { path = "/home/lavashik/Documents/Repos/source-fs" }
-source-kv = { path = "/home/lavashik/Documents/Repos/source-kv" }
+derive_more = { version = "2", features = ["deref"] }
+source-fs = { path = "/home/lavashik/Documents/Repos/GITHUB/souRSe-crates/crates/source-fs" }
+source-kv = { path = "/home/lavashik/Documents/Repos/GITHUB/souRSe-crates/crates/source-kv" }
+
+# [lints.rust]
+# unused = { level = "allow", priority = -1 } # For exploratory dev.
