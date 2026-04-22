@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 use vmf_forge::prelude::{Entity, Solid, VmfFile};
-use crate::generator::{self, LUT_WIDTH, VmtParams};
+use crate::generator::{self, LUT_WIDTH};
 use crate::math::{AABB, Vec3};
 use crate::parser::sanitize_name;
 use crate::types::{LightCluster, LightDef, ParallaxVolume};
@@ -18,7 +18,7 @@ pub mod utils;
 
 // Defines the material that identifies faces to be patched
 const TARGET_MATERIAL: &str = "tools/toolspbr";
-const GEOMETRY_OFFSET_UNITS: f32 = 0.95; // for offsets
+const GEOMETRY_OFFSET_UNITS: f32 = 0.8; // for offsets
 const UV_SEARCH_DIST: f32 = 16.0;
 
 const MAX_CUSTOM_SLOTS: usize = 4; // for force include/exclude
@@ -98,12 +98,14 @@ pub struct GgxSurfaceEnt {
     pub ggx_solids: Vec<Arc<RwLock<GgxSolid>>>,
 
     pub origin: String,
+    pub bounding_box: AABB,
     pub id: u64,
 
     // ggx_surface custom parms
     pub exclude_lights: HashSet<String>,
     pub force_lights: HashSet<String>,
     pub min_score: f32,
+    pub merge_solids: bool,
 
     pub template_material: String,
     pub override_roughness_mult: Option<f32>,
@@ -120,19 +122,22 @@ pub struct GgxSolid {
     #[deref_mut]
     pub solid: Solid,
     pub surface_normal: Vec3,
+    pub surface_center: Vec3,
     pub bound: AABB,
 }
 
 impl GgxSolid {
     pub fn new(solid: Solid) -> Self {
+        let target_points = solid.sides.iter()
+            .find(|side| side.material.eq_ignore_ascii_case(TARGET_MATERIAL))
+            .and_then(|side| parse_plane_points(&side.plane))
+            .unwrap();  // SAFETY: trust me!
+
         // Calc surface normal
-        let surface_normal = {
-            solid.sides.iter()
-                .find(|side| side.material.eq_ignore_ascii_case(TARGET_MATERIAL))
-                .and_then(|side| parse_plane_points(&side.plane))
-                .map(|points| calc_face_normal(points))
-                .unwrap() // SAFETY: trust me!
-        } * -1.0;
+        let surface_normal = calc_face_normal(target_points) * -1.0;
+
+        // Center of face surface // todo: fix and use in UV-parent finder?
+        let surface_center = (target_points[0] + target_points[1] + target_points[2]) / 3.0;
 
         // Calc bounding box
         let bounding_box = geometry::get_solid_aabb(&solid).unwrap_or(AABB::new());
@@ -140,6 +145,7 @@ impl GgxSolid {
         Self {
             solid,
             surface_normal,
+            surface_center,
             bound: bounding_box,
         }
     }
@@ -150,8 +156,8 @@ impl GgxSurfaceEnt {
         let id = entity.id();
 
         // Get surface origin. If not set, use AABB center
+        let bounding_box = geometry::get_entity_aabb(&entity).unwrap_or(AABB::new());
         let origin = entity.get("origin").cloned().unwrap_or_else(|| {
-            let bounding_box = geometry::get_entity_aabb(&entity).unwrap_or(AABB::new());
             let c = bounding_box.center;
             format!("{:.2} {:.2} {:.2}", c[0], c[1], c[2])
         });
@@ -177,8 +183,9 @@ impl GgxSurfaceEnt {
         }
 
         let min_score = entity.get("min_score").and_then(|s| s.parse::<f32>().ok()).unwrap_or(0.10);
-        // TODO: override parms
+        let merge_solids = entity.get("merge_solids").map(|s| s != "0").unwrap_or(false);
 
+        // TODO: use override parms
         let [
             override_roughness_mult,
             override_base_reflectivity,
@@ -206,8 +213,12 @@ impl GgxSurfaceEnt {
 
             id,
             origin,
+            bounding_box,
 
             template_material,
+            min_score,
+            merge_solids,
+
             override_roughness_mult,
             override_base_reflectivity,
             override_reflection_intensity,
@@ -217,15 +228,20 @@ impl GgxSurfaceEnt {
 
             exclude_lights,
             force_lights,
-            min_score
         }
     }
 
     pub fn convert_to_illusionary(mut self) -> Entity {
+        // self.entity.set("classname".to_string(), "func_brush".to_string());
         self.entity.set("classname".to_string(), "func_illusionary".to_string());
         self.entity.set("renderamt".to_string(), "200".to_string());
-        self.entity.set("rendermode".to_string(), "2".to_string());
-        // self.entity.set("pbr_workaround_shit".to_string(), "0".to_string()); // TODO: temp dev-stuff
+        self.entity.set("rendermode".to_string(), "5".to_string());
+
+        self.entity.set("disableflashlight".to_string(), "1".to_string());
+        self.entity.set("disableshadows".to_string(), "1".to_string());
+        self.entity.set("disablereceiveshadows".to_string(), "1".to_string());
+        self.entity.set("disableshadowdepth".to_string(), "1".to_string());
+        self.entity.set("rendertocubemaps".to_string(), "0".to_string());
 
         let original_solids: Vec<Solid> = self.ggx_solids
             .iter()
@@ -370,56 +386,70 @@ pub fn process_map_pipeline(
     // == Geometry Shifting & UV Fix
     info!("Applying geometry offsets and fixing UVs...");
     for cluster in &clusters {
-        let mut solid = cluster.solid.write().unwrap();
-
-        let normal = solid.surface_normal;
-
         // eg. "maps/sp_a2_triple_laser/surface_0_solid_0"
         let patch_material_str = format!("maps/{}/{}", map_name, cluster.surface_material);
 
-        // Calc geometry offset
-        let max_axis = normal.0.abs().max(normal.1.abs()).max(normal.2.abs());
-        let offset = normal * (GEOMETRY_OFFSET_UNITS * max_axis);
+        for solid_arc in &cluster.solids {
+            let mut solid = solid_arc.write().unwrap();
+            let normal = solid.surface_normal;
 
-        // Raycast for find 'parent' and fix UV
-        // TODO: or parse all solids to find it, OR make it in creating GgxSolid!
-        // BECAUSE for now it's not a very stable and efficient solution.
-        let start_pos = cluster.bound.center + (normal * 5.0);
-        // let start_pos = cluster.ggx_surface_origin + (normal * 5.0);
-        debug!("  [UV Fix] Casting ray from {:?} dir {:?} (dist: {})", start_pos, normal, UV_SEARCH_DIST);
+            // Calc geometry offset
+            let max_axis = normal.0.abs().max(normal.1.abs()).max(normal.2.abs());
+            let offset = normal * (GEOMETRY_OFFSET_UNITS * max_axis);
 
-        let parent_uv = tracer::trace_ray_closest(start_pos, normal * -1.0, UV_SEARCH_DIST, &world_brushes) // todo: what the heck with normal?
-            .inspect(|hit| debug!("    -> Hit world brush at dist {:.2} (brush id: {}). Copying UVs.", hit.t, hit.id))
-            .map(|hit| {
-                (hit.u_axis.clone(), hit.v_axis.clone())
-            });
+            // Raycast for find 'parent' and fix UV
+            // TODO: or parse all solids to find it, OR make it in creating GgxSolid!
+            // BECAUSE for now it's not a very stable and efficient solution.
+            let target_pts = solid.sides.iter()
+                .find(|side| side.material.eq_ignore_ascii_case(TARGET_MATERIAL))
+                .and_then(|side| parse_plane_points(&side.plane));
 
-        if parent_uv.is_none() {
-            debug!("    -> No parent surface found within range.");
-        }
+            let start_pos = if let Some(pts) = target_pts {
+                let p0 = pts[0];
+                let k = (p0 - solid.bound.center).dot(normal);
+                let point_on_plane = solid.bound.center + (normal * k);
 
-        let mut material_updated = false;
+                point_on_plane
+            } else {
+                solid.bound.center
+            } + (normal * 5.0);
 
-        // Modify solid sides
-        for side in &mut solid.sides {
-            side.plane = apply_offset_to_plane(&side.plane, offset);
+            debug!("  [UV Fix] Casting ray from {:?} dir {:?} (dist: {})", start_pos, normal, UV_SEARCH_DIST);
 
-            // update material
-            if side.material.eq_ignore_ascii_case(TARGET_MATERIAL) {
-                if let Some((u, v)) = parent_uv {
-                    side.u_axis = u.to_string();
-                    side.v_axis = v.to_string();
-                } else {
-                    warn!("No parent_uv found for cluster: {}", cluster.name);
-                }
+            let ray_dir = normal * -1.0;
+            let parent_uv = tracer::trace_ray_closest(start_pos, ray_dir, UV_SEARCH_DIST, &world_brushes)
+                .inspect(|hit| debug!("    -> x {:.2} (brush id: {}). Copying UVs.", hit.t, hit.id))
+                .map(|hit| {
+                    (hit.u_axis, hit.v_axis)
+                });
 
-                side.material = patch_material_str.clone();
-                material_updated = true;
+            if parent_uv.is_none() {
+                debug!("    -> No parent surface found within range.");
             }
-        }
 
-        if !material_updated {
-            warn!("The cluster {} (ggx_surface: {}) has no {} texture. PBS will be skipped!", cluster.name, cluster.ggx_surface_name, TARGET_MATERIAL);
+            let mut material_updated = false;
+
+            // Modify solid sides
+            for side in &mut solid.sides {
+                side.plane = apply_offset_to_plane(&side.plane, offset);
+
+                // update material
+                if side.material.eq_ignore_ascii_case(TARGET_MATERIAL) {
+                    if let Some((u, v)) = parent_uv {
+                        side.u_axis = u.to_string();
+                        side.v_axis = v.to_string();
+                    } else {
+                        warn!("No parent_uv found for cluster: {}", cluster.name);
+                    }
+
+                    side.material = patch_material_str.clone();
+                    material_updated = true;
+                }
+            }
+
+            if !material_updated {
+                warn!("The cluster {} (ggx_surface: {}) has no {} texture. PBS will be skipped!", cluster.name, cluster.ggx_surface_name, TARGET_MATERIAL);
+            }
         }
     }
 
@@ -430,22 +460,25 @@ pub fn process_map_pipeline(
         let vmt_path = cluster.surface_material_path.with_extension("vmt");
 
         // todo: cache template_materials and orig_vmt!
-        let mut orig_vmt = generator::find_and_process_vmt(game_dir, &cluster.pbr_material).unwrap_or_else(|m| {
-            error!("Failed to process VMT: {}", m);
-            VmtParams::default()
-        });
+        let mut orig_vmt = match generator::find_and_process_vmt(game_dir, &cluster.pbr_material) {
+            Ok(vmt) => vmt,
+            Err(m) => {
+                error!("Failed to process VMT: {} ({}). Skipping...", cluster.pbr_material, m);
+                continue;
+            }
+        };
 
         orig_vmt.num_lights = cluster.lights.len() as f32;
         // dbg!(&orig_vmt);
 
-        if let Err(e) = generator::generate_vtf(&cluster, &vtf_path, orig_vmt) {
+        if let Err(e) = generator::generate_vtf(&cluster, &vtf_path, &orig_vmt) {
             error!("Failed to create VTF for {}: {}", cluster.name, e); // todo: fix it and improve msg
         }
 
         generator::generate_vmt(
             &vmt_path,
             &vtf_lut_name,
-            &cluster.pbr_material,
+            &orig_vmt,
             &cluster.initial_c4,
             cluster.cubemap_name.as_deref(),
         )?;
@@ -557,7 +590,7 @@ pub fn process_cubemaps(vmf: &VmfFile,) -> Vec<InternalVolume> {
 fn select_and_score_lights(
     all_lights: &[LightDef],
     bounds: &AABB,
-    world_brushes: &[ConvexBrush], // Замени на свой тип кистей
+    world_brushes: &[ConvexBrush],
     exclude_lights: &HashSet<String>,
     force_lights: &HashSet<String>,
     min_score: f32,
@@ -702,67 +735,49 @@ impl LightCluster {
         let mat_output_dir = game_dir.join("materials").join(&mat_base_rel);
 
         debug!("Processing ggx_surface {:#?} id: {}", ggx_surface_name, ggx_surface.id);
-        let mut local_clusters = Vec::new();
-        for surface_counter in 0.. ggx_surface.ggx_solids.len() {
-            let solid_arc = ggx_surface.ggx_solids[surface_counter].clone();
-            let solid = solid_arc.read().unwrap();
-
-            let cluster_name = format!("{}_solid_{}", ggx_surface_name, surface_counter);
+        let build_cluster = |cluster_name: String, ggx_surface: &GgxSurfaceEnt, solids: Vec<Arc<RwLock<GgxSolid>>>, bound: AABB, normal: Vec3| -> LightCluster {
             let surface_material_path = mat_output_dir.join(&cluster_name);
 
             let (selected_lights, rejected_lights) = select_and_score_lights(
                 all_lights,
-                &solid.bound,
-                &world_brushes,
+                &bound,
+                world_brushes,
                 &ggx_surface.exclude_lights,
                 &ggx_surface.force_lights,
                 ggx_surface.min_score
             );
 
-            if selected_lights.is_empty() {
-                // warn!("Surface '{}' (id: {}, pos: '{}') has no active lights.", cluster_name, surface_id, origin.as_deref().unwrap_or_default());
-                // continue; // TODO: process it as additional arg
-            } else {
-                // info!("Surface '{}' (id: {}) -> assigned {} lights. (Rejected: {})", cluster_name, surface_id, selected_lights.len(), rejected_lights.len());
+            if !selected_lights.is_empty() {
                 debug!("  -> Selected Lights: {:?}", selected_lights.iter().map(|(v, _)| &v.id).collect::<Vec<_>>());
                 if !rejected_lights.is_empty() {
-                        debug!("  -> Rejected: {:?}", rejected_lights.iter().map(|(v, s)| format!("{} ({:.2})", v.id, s)).collect::<Vec<_>>());
+                    debug!("  -> Rejected: {:?}", rejected_lights.iter().map(|(v, s)| format!("{} ({:.2})", v.id, s)).collect::<Vec<_>>());
                 }
+            } else {
+                warn!("Surface '{}' (id: {}, pos: '{}') has no active lights.", cluster_name, ggx_surface.id, ggx_surface.origin);
             }
 
             // == Match PCC Volume
-            let solid_bound = solid.bound;
-            let parallax_volume = LightCluster::find_parallax_volume(
-                solid_bound.center,
-                solid.surface_normal,
-                &pcc_volumes
-            );
+            let parallax_volume = LightCluster::find_parallax_volume(bound.center, normal, pcc_volumes);
 
-            let cubemap_name = if let Some(ref pcc) = parallax_volume {
-                let ox = pcc.cubemap_pos[0] as i32;
-                let oy = pcc.cubemap_pos[1] as i32;
-                let oz = pcc.cubemap_pos[2] as i32;
-                Some(format!("maps/{}/c{}_{}_{}.hdr.vtf", map_name, ox, oy, oz))
-            } else {
-                None
-            };
+            let cubemap_name = parallax_volume.as_ref().map(|pcc| {
+                format!("maps/{}/c{}_{}_{}.hdr.vtf", map_name, pcc.cubemap_pos[0] as i32, pcc.cubemap_pos[1] as i32, pcc.cubemap_pos[2] as i32)
+            });
 
-            let mut initial_c4 = [1.0f32; 4];
+            let mut initial_c4 =[1.0f32; 4];
             for (i, (light, _score)) in selected_lights.iter().take(4).enumerate() {
                 if light.initially_dark {
                     initial_c4[i] = 0.0;
                 }
             }
 
-            drop(solid); // Release read lock, to use 'solid_arc' in LightCluster
-            local_clusters.push(LightCluster {
-                solid: solid_arc,
+            LightCluster {
+                solids,
                 ggx_surface_name: ggx_surface_name.to_string(),
                 ggx_surface_id: ggx_surface.id,
                 ggx_surface_origin: Vec3::parse(&ggx_surface.origin),
 
                 name: cluster_name.clone(),
-                bound: solid_bound,
+                bound,
                 pbr_material: ggx_surface.template_material.clone(),
                 surface_material: cluster_name,
                 surface_material_path,
@@ -771,10 +786,24 @@ impl LightCluster {
                 rejected_lights,
                 min_cluster_score: ggx_surface.min_score,
                 pcc_volume: parallax_volume,
-                cubemap_name: cubemap_name.clone(),
-            });
-        }
+                cubemap_name,
+            }
+        };
 
-        local_clusters
+        if ggx_surface.merge_solids && !ggx_surface.ggx_solids.is_empty() {
+            let first_solid = ggx_surface.ggx_solids[0].read().unwrap();
+            let normal = first_solid.surface_normal;
+
+            let cluster_name = format!("{}_merged", ggx_surface_name);
+
+            vec![build_cluster(cluster_name, ggx_surface, ggx_surface.ggx_solids.clone(), ggx_surface.bounding_box, normal)]
+        } else {
+            ggx_surface.ggx_solids.iter().enumerate().map(|(i, solid_arc)| {
+                let solid = solid_arc.read().unwrap();
+                let cluster_name = format!("{}_solid_{}", ggx_surface_name, i);
+
+                build_cluster(cluster_name, ggx_surface, vec![solid_arc.clone()], solid.bound, solid.surface_normal)
+            }).collect()
+        }
     }
 }

@@ -15,7 +15,7 @@ pub fn calculate_score(
     world_brushes: &[ConvexBrush],
 ) -> f32 {
     let light_pos = light.pos;
-    debug!("Calculating score for light '{:?}' (id: {}) on surface with center {:?}", light.target_name, light.id, surface_aabb.center);
+    debug!("Calculating score for light {:?} (id: {}) on surface with center {:?}", light.target_name, light.id, surface_aabb.center);
 
     // Quick distance test
     let dist_sq = crate::math::sq_dist_point_aabb(light_pos, surface_aabb);
@@ -27,12 +27,15 @@ pub fn calculate_score(
     }
 
     // Shape Check (Spot / Rect Direction)
-    if !check_shape_visibility(light, surface_aabb) {
-        if light.is_named_light {
-             debug!("  > Named light '{}' (id: {}) culled by shape. (Closest Dist: {:.1})", light.target_name, light.id, dist);
-        }
-        return 0.0;
-    }
+    // TODO: broken for now, FUCKING SHIT
+    // if !check_shape_visibility(light, surface_aabb) {
+    //     if light.is_named_light {
+    //          debug!("  > Named light '{}' (id: {}) culled by shape. (Closest Dist: {:.1})", light.target_name, light.id, dist);
+    //     } else {
+    //         debug!("  > Shape check failed for light '{}' (id: {}) on surface with center {:?}", light.target_name, light.id, surface_aabb.center);
+    //     }
+    //     return 0.0;
+    // }
 
     // Scoring, using: 'I / (1 + K * d^2)'
     let k = light.attenuation_k;

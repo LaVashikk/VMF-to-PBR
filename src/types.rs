@@ -1,8 +1,5 @@
 use std::{path::PathBuf, sync::{Arc, RwLock}};
-
-use vmf_forge::prelude::Solid;
-
-use crate::{math::{AABB, Vec3}, processing::{GgxSolid, GgxSurfaceEnt}};
+use crate::{math::{AABB, Vec3}, processing::GgxSolid};
 
 const MAX_BLOCKERS: usize = 2;
 
@@ -76,7 +73,7 @@ pub struct ParallaxVolume {
 /// This will be baked into a single Nx16 LUT texture.
 #[derive(Debug)]
 pub struct LightCluster {
-    pub solid: Arc<RwLock<GgxSolid>>,
+    pub solids: Vec<Arc<RwLock<GgxSolid>>>,
     pub ggx_surface_name: String,
     pub ggx_surface_id: u64,
     pub ggx_surface_origin: Vec3,
