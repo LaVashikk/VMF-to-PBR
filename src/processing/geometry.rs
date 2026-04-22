@@ -1,5 +1,7 @@
-use crate::{math::{Vec3, AABB}, processing::utils};
-use log::{debug, warn};
+use crate::math::{AABB, Vec3};
+use crate::utils;
+use log::{debug, info, warn};
+use vmf_forge::VmfFile;
 use vmf_forge::prelude::{Entity, Solid};
 
 #[derive(Debug, Clone)]
@@ -46,7 +48,7 @@ impl ConvexBrush {
 
         for side in &solid.sides {
             // Parse 3 points of the plane
-            let points = match super::utils::parse_plane_points(&side.plane) {
+            let points = match utils::text::parse_plane_points(&side.plane) {
                 Some(pts) => pts,
                 None => {
                     warn!("Solid ID {}: Malformed plane definition found. Side has less than 3 points. Side plane: '{}'", solid.id, side.plane);
@@ -63,7 +65,7 @@ impl ConvexBrush {
             valid_points_found = true;
 
             // Calculate the plane normal
-            let n = utils::calc_face_normal(points) * -1.0; // todo haha
+            let n = utils::text::calc_face_normal(points) * -1.0; // todo haha
             let d = -n.dot(points[0]);
 
             planes.push(Plane {
@@ -99,7 +101,7 @@ pub fn get_entity_aabb(ent: &Entity) -> Option<AABB> {
 
     for solid in solids {
         for side in &solid.sides {
-            if let Some(points) = super::utils::parse_plane_points(&side.plane) {
+            if let Some(points) = utils::text::parse_plane_points(&side.plane) {
                 for p in points {
                     aabb.extend(p);
                 }
@@ -119,7 +121,7 @@ pub fn get_solid_aabb(solid: &Solid) -> Option<AABB> {
     let mut found = false;
 
     for side in solid.sides.iter() {
-        if let Some(points) = super::utils::parse_plane_points(&side.plane) {
+        if let Some(points) = utils::text::parse_plane_points(&side.plane) {
             for p in points {
                 aabb.extend(p);
             }
@@ -129,4 +131,40 @@ pub fn get_solid_aabb(solid: &Solid) -> Option<AABB> {
 
     if !found { return None; }
     Some(aabb)
+}
+
+/// Builds the collision world from VMF solids and func_details
+pub fn build_collision_world(vmf: &VmfFile) -> Vec<ConvexBrush> {
+    debug!("Building collision world...");
+    let mut brushes = Vec::new();
+
+    // World Solids (worldspawn)
+    debug!("Processing {} world solids...", vmf.world.solids.len());
+    for solid in &vmf.world.solids {
+        if let Some(brush) = ConvexBrush::from_vmf_solid(solid) {
+            brushes.push(brush);
+        }
+    }
+
+    // Func Detail
+    for ent in vmf.entities.iter() {
+        let classname = ent.classname().unwrap_or("");
+        if let Some(should_skip) = ent.get("pbr_geometry_ignore") {  // todo
+            if should_skip != "0" { continue }
+        }
+
+        if classname == "func_detail" { // ? i think we should ignore any dynamic ents
+            debug!("Found collidable entity: class='{}', targetname='{}'", classname, ent.targetname().unwrap_or("N/A"));
+            if let Some(solids) = &ent.solids {
+                for solid in solids {
+                    if let Some(brush) = ConvexBrush::from_vmf_solid(solid) {
+                        brushes.push(brush);
+                    }
+                }
+            }
+        }
+    }
+
+    info!("Built collision world with {} brushes.", brushes.len());
+    brushes
 }

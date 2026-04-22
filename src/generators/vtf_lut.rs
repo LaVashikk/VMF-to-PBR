@@ -1,17 +1,12 @@
-use source_fs::{DummyVpk, FileSystem, FileSystemOptions, P2GameInfo};
-use crate::math::Vec3;
-use crate::types::{LightCluster, LightType};
-use crate::vmt_helper::VmtPbrParams;
-use anyhow::{Context, bail};
-use std::fs::File;
-use std::io::Write;
-
 use std::path::Path;
 
-pub const LUT_WIDTH: usize = 8;
-pub const LUT_HEIGHT: usize = 16;
+use crate::math::Vec3;
+use crate::types::LightType;
+use crate::{types::LightCluster, vmt_helper::VmtPbrParams};
 
-pub fn generate_vtf(cluster: &LightCluster, output_path: &Path, params: &VmtPbrParams) -> anyhow::Result<()> {
+use crate::constants::{LUT_WIDTH, LUT_HEIGHT};
+
+pub fn generate(cluster: &LightCluster, output_path: &Path, params: &VmtPbrParams) -> anyhow::Result<()> {
     let num_lights = cluster.lights.len();
 
     // Ensure parent directory exists
@@ -177,66 +172,4 @@ pub fn generate_vtf(cluster: &LightCluster, output_path: &Path, params: &VmtPbrP
     };
 
     crate::vtf_writer::write_rgba32f_vtf(&vtf_path, params, &raw_data)
-}
-
-pub fn find_and_process_vmt(game_dir: &Path, base_material: &str) -> anyhow::Result<VmtPbrParams> {
-    let options = FileSystemOptions::default();
-    let fs = match FileSystem::<DummyVpk>::load_from_path::<P2GameInfo>(game_dir, &options) {
-        Some(fs) => fs,
-        None => {
-            bail!("Failed to load filesystem. Check if gameinfo.txt exists");
-        }
-    };
-
-    let vmt_data = fs.read(
-        format!("materials/{}.vmt", base_material).as_str(),
-        "game",
-        false
-    )
-    .map(|v| String::from_utf8_lossy(&v).to_string())
-    .context(format!("\"{}\" Not Found", base_material))?;
-
-    VmtPbrParams::parse_from_vmt(&vmt_data)
-}
-
-/// Generates a Patch VMT that includes the base PBR shader and inserts the generated LUT
-pub fn generate_vmt(vmt_path: &Path, texture_rel_path: &str, params: &VmtPbrParams, initial_c4: &[f32; 4], cubemap_path: Option<&str>) -> anyhow::Result<()> {
-    if let Some(parent) = vmt_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    // TODO: now i have native VMT support, use it!
-
-    let mut file = File::create(vmt_path)?;
-
-    writeln!(file, "patch")?;
-    writeln!(file, "{{")?;
-    writeln!(file, "\tinclude \"materials/{}.vmt\"", params.pbr_shader_template)?; // preprocess materials/vmt path
-    writeln!(file, "\treplace")?;
-    writeln!(file, "\t{{")?;
-
-    // Normalize path separators to forward slashes for Source Engine
-    let clean_path = texture_rel_path.replace('\\', "/");
-    writeln!(file, "\t\t$basetexture \"{}\"", params.bump_map)?;
-    writeln!(file, "\t\t$texture1 \"{}\"", clean_path)?;
-
-    // Inject Cubemap if available
-    if let Some(env_map) = params.env_map.as_ref() {
-        writeln!(file, "\t\t$texture2 \"{}\"", env_map)?;
-    } else if let Some(cpath) = cubemap_path {
-        writeln!(file, "\t\t$texture2 \"{}\"", cpath)?;
-    }
-
-    writeln!(file, "\t\t$texture3 \"{}\"", params.mrao_map)?;
-
-
-    // Write $c4 vector based on light initial state
-    writeln!(file, "\t\t$c4_x {:.2}", initial_c4[0])?;
-    writeln!(file, "\t\t$c4_y {:.2}", initial_c4[1])?;
-    writeln!(file, "\t\t$c4_z {:.2}", initial_c4[2])?;
-    writeln!(file, "\t\t$c4_w {:.2}", initial_c4[3])?;
-
-    writeln!(file, "\t}}")?;
-    writeln!(file, "}}")?;
-
-    Ok(())
 }

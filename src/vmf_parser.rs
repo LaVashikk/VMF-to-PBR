@@ -130,24 +130,50 @@ pub fn extract_lights(vmf: &VmfFile) -> anyhow::Result<Vec<LightDef>> {
                     shader_intensity = intensity; // Already correct for this mode
                     let dist0 = ent.get("_zero_percent_distance").and_then(|s| s.parse::<f32>().ok()).unwrap_or(dist50 * 5.0);
                     range = dist0;
+                // } else {
+                //     // Legacy Falloff
+                //     if c < 0.0001 && l < 0.0001 && q < 0.0001 { c = 1.0; }
+
+                //     let ratio = c + (100.0 * l) + (10000.0 * q);
+                //     let src_energy = if ratio > 0.001 { intensity * ratio } else { 0.0 };
+
+                //     let math_c = if c < 1.0 { 1.0 } else { c };
+
+                //     shader_intensity = src_energy / math_c;
+                //     shader_k = q / math_c;
+
+                //     if shader_k > 1e-8 {
+                //         let val = (shader_intensity / LIGHT_CUTOFF_THRESHOLD - 1.0) / shader_k;
+                //         range = if val > 0.0 { val.sqrt() } else { 1000.0 };
+                //     } else {
+                //         range = 20000.0;
+                //     }
+                // }
                 } else {
-                    // Legacy Falloff
-                    if c < 0.0001 && l < 0.0001 && q < 0.0001 { c = 1.0; }
+                    // --- LEGACY FALLOFF FIX (Short & Contrast) ---
 
-                    let ratio = c + (100.0 * l) + (10000.0 * q);
-                    let src_energy = if ratio > 0.001 { intensity * ratio } else { 0.0 };
+                    shader_intensity = intensity * 0.75; // todo: СЕЙЧАС В ШЕЙДЕРЕ ЕСТЬ КОМПЕНСАЦИЯ НЕБОЛЬШАЯ DGX!!!!!!! ЛАВАШ СКОРРЕКТИРУЙ ПЖ ПОТОМ, НЕ ЗАБУДЬ - ДУРАК!
 
-                    let math_c = if c < 1.0 { 1.0 } else { c };
+                    let target_d50 = 55.0;
+                    let dist50_sq = target_d50 * target_d50; // 3025
 
-                    shader_intensity = src_energy / math_c;
-                    shader_k = q / math_c;
+                    // K ≈ 0.00033
+                    let mut k = 1.0 / dist50_sq;
 
-                    if shader_k > 1e-8 {
-                        let val = (shader_intensity / LIGHT_CUTOFF_THRESHOLD - 1.0) / shader_k;
-                        range = if val > 0.0 { val.sqrt() } else { 1000.0 };
+                    if l > 0.001 { k *= 0.2; }
+                    if c > 0.001 { k *= 0.01; }
+
+                    shader_k = k;
+
+                    let cutoff_brightness = 0.02;
+                    if shader_intensity > cutoff_brightness {
+                        let val = (shader_intensity / cutoff_brightness - 1.0) / shader_k;
+                        range = val.sqrt();
                     } else {
-                        range = 20000.0;
+                        range = 100.0;
                     }
+
+                    range = range.clamp(64.0, 4000.0);
                 }
 
                 // Shape & Direction
@@ -230,6 +256,7 @@ pub fn extract_lights(vmf: &VmfFile) -> anyhow::Result<Vec<LightDef>> {
             });
         }
     }
+
     Ok(lights)
 }
 
@@ -258,12 +285,6 @@ fn parse_color_intensity(s: &str) -> (Vec3, f32) {
     } else {
         (Vec3::ONE, 200.0)
     }
-}
-
-pub fn sanitize_name(string: &str) -> String {
-    string.chars()
-        .filter(|&c| !matches!(c, '.' | '-' | ' '))
-        .collect::<String>()
 }
 
 /// Helper: Convert Source angles to Vector

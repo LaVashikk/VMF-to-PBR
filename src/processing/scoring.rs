@@ -1,11 +1,82 @@
+use crate::{constants::LUT_WIDTH, types::{LightDef, LightType}};
+use super::geometry::ConvexBrush;
 use crate::math::{Vec3, AABB};
-use crate::processing::geometry::ConvexBrush;
-use crate::processing::tracer;
-use crate::types::{LightDef, LightType};
+use super::tracer;
 use log::debug;
+use std::collections::HashSet;
 
 // Tolerance in degrees. Allows the light to "catch" an object if it extends slightly beyond the cone's boundaries.
 const CONE_ANGLE_TOLERANCE_DEG: f32 = 10.0;
+
+
+/// Scoring & Light Selection
+pub fn select_and_score_lights(
+    all_lights: &[LightDef],
+    bounds: &AABB,
+    world_brushes: &[ConvexBrush],
+    exclude_lights: &HashSet<String>,
+    force_lights: &HashSet<String>,
+    min_score: f32,
+) -> (Vec<(LightDef, f32)>, Vec<(LightDef, f32)>) {
+    let mut scored_lights: Vec<(usize, f32)> = Vec::new();
+
+    for (idx, light) in all_lights.iter().enumerate() {
+        // Check Exclude
+        if light.is_named_light && exclude_lights.contains(&light.target_name) { // TODo: improve it! add additional fake-naming key
+            debug!("  > Light '{}' (id: {}) manually excluded.", light.target_name, light.id);
+            continue;
+        }
+
+        // Check Force
+        if light.is_named_light && force_lights.contains(&light.target_name) { // TODo: improve it! add additional fake-naming key
+            debug!("  > Light '{}' (id: {}) manually included.", light.target_name, light.id);
+            scored_lights.push((idx, f32::MAX));
+            continue;
+        }
+
+        let score = calculate_score(light, bounds, &world_brushes);
+        if score > 0.0 {
+            scored_lights.push((idx, score));
+        }
+    }
+
+    // Normalization of scores
+    let max_score = scored_lights.iter()
+        .filter(|(_, s)| *s < f32::MAX) // Ignore forced lights
+        .map(|(_, s)| *s)
+        .fold(0.0, f32::max);
+    if max_score > 0.0 {
+        for (_, score) in scored_lights.iter_mut() {
+            if *score < f32::MAX {
+                *score /= max_score;
+            }
+        }
+    }
+
+    // Sort lights by score in descending order
+    scored_lights.sort_by(|a, b| b.1.partial_cmp(&a.1).expect("NaN, its a bug"));
+
+    let (mut accepted_candidates, mut rejected_candidates): (Vec<_>, Vec<_>) = scored_lights.into_iter()
+        .partition(|(_, s)| *s >= f32::MAX || *s >= min_score);
+
+    if accepted_candidates.len() > LUT_WIDTH {
+        let overflow = accepted_candidates.split_off(LUT_WIDTH);
+        rejected_candidates.extend(overflow);
+    }
+
+    // Stable sort to prefer named lights
+    accepted_candidates.sort_by_key(|(idx, _)| !all_lights[*idx].is_named_light);
+
+    let selected_lights: Vec<(LightDef, f32)> = accepted_candidates.into_iter()
+        .map(|(idx, score)| (all_lights[idx].clone(), score))
+        .collect();
+
+    let rejected_lights: Vec<(LightDef, f32)> = rejected_candidates.into_iter()
+        .map(|(idx, score)| (all_lights[idx].clone(), score))
+        .collect();
+
+    (selected_lights, rejected_lights)
+}
 
 /// Calculates a "Score" for a (Light, Surface) pair.
 /// The higher the score, the more important the light is. 0.0 = light is not needed.

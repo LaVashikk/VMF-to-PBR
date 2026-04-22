@@ -1,5 +1,5 @@
 [package]
-name = "pbr-lut-gen"
+name = "VMF-to-PBR"
 version = "0.1.0"
 edition = "2024"
 
@@ -17,8 +17,8 @@ simplelog = "0.12.2"
 
 byteorder = "1.5.0"
 derive_more = { version = "2", features = ["deref"] }
-source-fs = { path = "/home/lavashik/Documents/Repos/GITHUB/souRSe-crates/crates/source-fs" }
-source-kv = { path = "/home/lavashik/Documents/Repos/GITHUB/souRSe-crates/crates/source-kv" }
+source-fs = "0.1.0"
+source-kv = "0.1.0"
 
 # [lints.rust]
 # unused = { level = "allow", priority = -1 } # For exploratory dev.

@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use std::fmt;
-use std::ops::{Add, AddAssign, Div, DivAssign, Index, IndexMut, Mul, MulAssign, Sub, SubAssign};
+use std::ops::{Add, Div, Index, IndexMut, Mul, Sub};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Vec3(pub f32, pub f32, pub f32);

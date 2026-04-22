@@ -1,5 +1,6 @@
 use std::{path::PathBuf, sync::{Arc, RwLock}};
-use crate::{math::{AABB, Vec3}, processing::GgxSolid};
+use crate::math::{AABB, Vec3};
+use crate::processing::surface_wrappers::GgxSolid;
 
 const MAX_BLOCKERS: usize = 2;
 
@@ -93,4 +94,36 @@ pub struct LightCluster {
 
     pub pcc_volume: Option<ParallaxVolume>,
     pub cubemap_name: Option<String>,
+}
+
+impl LightCluster {
+    pub fn dump(&self) {
+        println!("---\nCluster: '{}'", self.name);
+        println!("   Coordinated: {}", self.bound.center);
+        println!("   PBR Material: {:?}", self.pbr_material);
+        println!("   LUT Data Material: {:?}", self.surface_material_path.display());
+        println!("   GGX_SURFACE entity: {:?} (hammer id: {})", self.ggx_surface_name, self.ggx_surface_id);
+        println!("   Min Score Threshold: {:.4}", self.min_cluster_score);
+        println!("   Cubemap Name: {:?}", self.cubemap_name.as_deref().unwrap_or("None"));
+
+        println!("   [ACCEPTED LIGHTS] (Count: {})", self.lights.len());
+        for (light, score) in &self.lights {
+            let score_str = if *score > 10000.0 {
+                "FORCE".to_string()
+            } else {
+                format!("{:.4}", score)
+            };
+
+            println!("     + {:<25} | Score: {}", light.id, score_str);
+        }
+
+        if !self.rejected_lights.is_empty() {
+            println!("   [REJECTED LIGHTS] (Count: {})", self.rejected_lights.len());
+            for (light, score) in &self.rejected_lights {
+                println!("     - {:<25} | Score: {:.4}", light.id, score);
+            }
+        } else {
+            println!("   [REJECTED LIGHTS] (None)");
+        }
+    }
 }

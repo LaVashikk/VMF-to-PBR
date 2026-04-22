@@ -1,8 +1,6 @@
 use crate::math::{Vec3, AABB};
 use crate::types::{LightCluster, LightDef, LightType};
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{self, Write};
 use std::path::Path;
 use serde::{Serialize, Serializer};
 
@@ -74,11 +72,11 @@ struct PbrData {
     lights: HashMap<String, PbrLight>,
 }
 
-pub fn generate_nut(
+pub fn generate(
     path: &Path,
     clusters: &[LightCluster],
     all_lights: &[LightDef],
-) -> io::Result<()> {
+) -> anyhow::Result<()> {
     return Ok(());
     todo!("not implemented new version!");
 

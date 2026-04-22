@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::Context;
 use serde::Deserialize;
+use source_fs::{FileSystem, PackFile};
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
@@ -27,7 +28,7 @@ pub struct VmtPbrParams {
     #[serde(rename = "$roughnessbias")]
     pub roughness_bias: f32,
 
-    #[serde(rename = "$numlights")]
+    #[serde(skip)]
     pub num_lights: f32,
 
     #[serde(rename = "$uv_scale")]
@@ -94,6 +95,18 @@ impl VmtPbrParams {
             .context("VMT is empty or missing a shader block")?;
 
         Ok(shader_body.pbr.context("Missing PBR block in VMT")?)
+    }
+
+    pub fn find_and_parse<P: PackFile>(fs: &FileSystem<P>, base_material: &str) -> anyhow::Result<VmtPbrParams> {
+        let vmt_data = fs.read(
+            format!("materials/{}.vmt", base_material).as_str(),
+            "game",
+            true
+        )
+        .map(|v| String::from_utf8_lossy(&v).to_string())
+        .context(format!("\"{}\" Not Found", base_material))?;
+
+        VmtPbrParams::parse_from_vmt(&vmt_data)
     }
 
     pub fn parse_vmt_file(path: &std::path::Path) -> anyhow::Result<Self> {

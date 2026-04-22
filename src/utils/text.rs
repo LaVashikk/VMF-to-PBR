@@ -48,3 +48,9 @@ pub fn apply_offset_to_plane(plane_str: &str, offset: Vec3) -> String {
         plane_str.to_string()
     }
 }
+
+pub fn sanitize_name(string: &str) -> String {
+    string.chars()
+        .filter(|&c| !matches!(c, '.' | '-' | ' '))
+        .collect::<String>()
+}
