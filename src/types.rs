@@ -64,7 +64,7 @@ pub struct LightDef {
 }
 
 #[derive(Debug, Clone)]
-pub struct ParallaxVolume {
+pub struct ParallaxCubemap {
     pub cubemap_pos: Vec3, // World space position of the selected env_cubemap
     pub ws_min: Vec3,      // World space AABB Min of the volume
     pub ws_max: Vec3,      // World space AABB Max of the volume
@@ -92,7 +92,7 @@ pub struct LightCluster {
     pub min_cluster_score: f32,
     pub rejected_lights: Vec<(LightDef, f32)>,
 
-    pub pcc_volume: Option<ParallaxVolume>,
+    pub pcc_volume: Option<ParallaxCubemap>,
     pub cubemap_name: Option<String>,
 }
 

@@ -2,10 +2,10 @@ use log::{info, warn};
 use vmf_forge::prelude::VmfFile;
 use crate::math::Vec3;
 use super::geometry;
-use crate::types::ParallaxVolume;
+use crate::types::ParallaxCubemap;
 
 
-pub fn find_parallax_volume(origin: Vec3, surface_normal: Vec3, pcc_volumes: &[InternalVolume]) -> Option<ParallaxVolume> {
+pub fn find_parallax_volume(origin: Vec3, surface_normal: Vec3, pcc_volumes: &[ParallaxVolume]) -> Option<ParallaxCubemap> {
     let mut best_pcc_data = None;
 
     // todo: made better way to find closest cubemap
@@ -14,11 +14,11 @@ pub fn find_parallax_volume(origin: Vec3, surface_normal: Vec3, pcc_volumes: &[I
         //    origin[1] >= vol.ws_min[1] && origin[1] <= vol.ws_max[1] &&
         //    origin[2] >= vol.ws_min[2] && origin[2] <= vol.ws_max[2]
         // {
-                if !vol.cubemaps_inside.is_empty() {
+                if !vol.cubemaps_origins.is_empty() {
                     let mut best_score = f32::MIN;
-                    let mut best_c = vol.cubemaps_inside[0];
+                    let mut best_c = vol.cubemaps_origins[0];
 
-                    for &c in &vol.cubemaps_inside {
+                    for &c in &vol.cubemaps_origins {
                         let to_cubemap = c - origin;
                         let dist_sq = to_cubemap.dot(to_cubemap);
                         let mut score = -dist_sq;
@@ -39,7 +39,7 @@ pub fn find_parallax_volume(origin: Vec3, surface_normal: Vec3, pcc_volumes: &[I
                         }
                     }
 
-                    best_pcc_data = Some(crate::types::ParallaxVolume {
+                    best_pcc_data = Some(crate::types::ParallaxCubemap {
                         cubemap_pos: best_c,
                         ws_min: vol.ws_min,
                         ws_max: vol.ws_max,
@@ -53,13 +53,13 @@ pub fn find_parallax_volume(origin: Vec3, surface_normal: Vec3, pcc_volumes: &[I
 }
 
 
-pub struct InternalVolume {
+pub struct ParallaxVolume {
     ws_min: Vec3,
     ws_max: Vec3,
-    cubemaps_inside: Vec<Vec3>,
+    cubemaps_origins: Vec<Vec3>,
 }
 
-pub fn process_cubemaps(vmf: &VmfFile,) -> Vec<InternalVolume> {
+pub fn process_cubemaps(vmf: &VmfFile,) -> Vec<ParallaxVolume> {
     let cubemaps_origin: Vec<Vec3> = vmf.entities
         .iter()
         .filter(|ent| ent.classname().unwrap_or("") == "env_cubemap")
@@ -87,10 +87,10 @@ pub fn process_cubemaps(vmf: &VmfFile,) -> Vec<InternalVolume> {
                 }
             }
 
-            Some(InternalVolume {
+            Some(ParallaxVolume {
                 ws_min: aabb.min,
                 ws_max: aabb.max,
-                cubemaps_inside: inside,
+                cubemaps_origins: inside,
             })
         })
         .collect()

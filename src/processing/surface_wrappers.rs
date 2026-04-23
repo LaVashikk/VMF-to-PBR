@@ -1,7 +1,7 @@
 use crate::constants::TARGET_MATERIAL;
 use crate::math::{AABB, Vec3};
 use crate::types::{LightCluster, LightDef};
-use super::cubemaps::{self, InternalVolume};
+use super::cubemaps::{self, ParallaxVolume};
 use super::geometry::{self, ConvexBrush};
 use super::scoring::select_and_score_lights;
 use crate::text::{calc_face_normal, parse_plane_points, sanitize_name};
@@ -197,7 +197,7 @@ impl LightCluster {
         game_dir: &Path,
         all_lights: &[LightDef],
         world_brushes: &[ConvexBrush],
-        pcc_volumes: &[InternalVolume],
+        pcc_volumes: &[ParallaxVolume],
     ) -> Vec<LightCluster> {
         let mat_base_rel = Path::new("maps").join(map_name);
         let mat_output_dir = game_dir.join("materials").join(&mat_base_rel);

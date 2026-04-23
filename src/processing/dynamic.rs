@@ -1,32 +1,32 @@
-use std::collections::HashMap;
+use std::{collections::{HashMap, HashSet}, hash::Hash, sync::Arc};
 use vmf_forge::prelude::{Entity, VmfFile};
 
 use crate::types::LightDef;
 
-pub type LightConnectionRegistry = HashMap<u64, Vec<LightConnection>>;
+pub type Connection = Vec<(Arc<str>, String)>;
+pub type LightConnectionRegistry = HashMap<u64, Vec<LightConnection>>; // target entity -> connection data
 
 #[derive(Debug)]
 pub struct DynamicControllers {
     pub modify_control_entities: Vec<Entity>,
-    pub backpatch_connections: HashMap<usize, Vec<(String, String)>>, // entity_id -> vec of connections
+    pub backpatch_connections: HashMap<usize, Connection>, // entity_id -> vec of connections
 }
 
 pub fn build_dynamic_controllers(
-    selected_lights: &[(LightDef, f32)],
+    selected_lights: &[(LightDef, f32)], // light and score
     cluster_name: &str,
     mat_name: &str,
     origin: &str,
     light_connection_registry: &LightConnectionRegistry,
 ) -> DynamicControllers {
     let mut modify_control_entities = Vec::new();
-    let mut backpatch_connections: HashMap<usize, Vec<(String, String)>> = HashMap::new();
+    let mut backpatch_connections: HashMap<usize, Connection> = HashMap::new();
 
     for (i, (light, _score)) in selected_lights.iter().take(4).enumerate() {
         if !light.is_named_light {
             continue;
         }
 
-        let lookup_key = light.id; // TODO!!!!!!!!! fix it
         let ctrl_name = format!("{}_ctrl_{}", cluster_name, i);
 
         let mut ctrl_ent = Entity::new("material_modify_control", 100_000);
@@ -47,7 +47,7 @@ pub fn build_dynamic_controllers(
 
         modify_control_entities.push(ctrl_ent);
 
-        if let Some(conns) = light_connection_registry.get(&lookup_key) {
+        if let Some(conns) = light_connection_registry.get(&light.id) {
             // Back-patching connections
             log::debug!("Back-patching connections for {}. {:?}", ctrl_name, conns);
             for conn in conns {
@@ -71,75 +71,93 @@ pub fn build_dynamic_controllers(
     DynamicControllers { modify_control_entities, backpatch_connections }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LightConnection {
-    source_entity_id: usize, // todo: id
-    target_name: String,
-    output_name: String,
+    // WHO run output
+    source_entity_id: usize,
+    // what output
+    output_name: Arc<str>,
+    // what target input
     input_type: LightInputType,
+    // optional params
+    _parameters: Option<String>,
+    // aaand delay! that wasn't obvious fr
     delay: f32,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 enum LightInputType {
     TurnOn,
     TurnOff,
     // todo: Toggle and SetPattern is complex to handle
 }
 
-impl LightConnection {
-    fn parse(ent: &Entity) -> Option<Self> {
-        let Some(connections) = &ent.connections else { return None; };
+pub fn build_connections_registry(vmf: &VmfFile,) -> LightConnectionRegistry {
+    let mut targetname_to_ids: HashMap<String, Vec<u64>> = HashMap::new();
+    for ent in vmf.entities.iter() {
+        if let Some(name) = ent.targetname() {
+            targetname_to_ids.entry(name.to_lowercase()).or_default().push(ent.id());
+        }
+    }
 
-        for (output, value) in connections {
+    let mut light_connection_registry: LightConnectionRegistry = HashMap::new();
+    let mut outputs_cache: HashSet<Arc<str>> = HashSet::new();
+
+    for ent in vmf.entities.iter() {
+        let Some(connections) = ent.connections.as_ref() else { continue };
+
+        for (output, value) in connections.iter() {
             // Parse VMF connection string: "TargetEntity,Input,Param,Delay,Limit"
             let parts: Vec<&str> = value.split([',', '\x1B']).collect(); // TODO: move to vmf-forge!
             let target = parts[0].trim();
             let input = parts[1].trim();
+            let parameters = Some(parts[2].trim()).filter(|s| !s.is_empty()).map(|s| s.to_string());
             let delay = parts.get(3).and_then(|s| s.trim().parse::<f32>().ok()).unwrap_or(0.0);
 
-            let input_type = match input.to_lowercase().as_str() {
-                "turnon" => Some(LightInputType::TurnOn),
-                "turnoff" => Some(LightInputType::TurnOff),
-                _ => None
+            // Use Arc for caching output names
+            let output_arc = match outputs_cache.get(output.as_str()) {
+                Some(existing) => existing.clone(),
+                None => {
+                    let new_arc: Arc<str> = Arc::from(output.as_str());
+                    outputs_cache.insert(new_arc.clone());
+                    new_arc
+                }
             };
 
-            if let Some(it) = input_type {
-                // if target is "!self" -> then use "ent.targetname()"
-                let raw_name = if target.eq_ignore_ascii_case("!self") {
-                    let Some(name) = ent.targetname() else { continue };
-                    name
-                } else {
-                    target
+            let input_type = match input.to_lowercase().as_str() {
+                "turnon" => LightInputType::TurnOn,
+                "turnoff" => LightInputType::TurnOff,
+                _ => continue
+            };
+
+            // if target is "!self" -> then use "ent.targetname()"
+            let target_name = if target.eq_ignore_ascii_case("!self") {
+                let Some(name) = ent.targetname() else { continue };
+                name
+            } else {
+                target
+            }.to_lowercase();
+
+            let Some(target_ids) = targetname_to_ids.get(&target_name) else { continue };
+
+            for id in target_ids {
+                let key = *id;
+                let conn = LightConnection {
+                    source_entity_id: ent.id() as usize,
+                    output_name: output_arc.clone(),
+                    input_type,
+                    _parameters: parameters.clone(),
+                    delay,
                 };
 
-                let target_name = raw_name.to_lowercase();
-
-                return Some(LightConnection {
-                    source_entity_id: ent.id() as usize,
-                    target_name,
-                    output_name: output.clone(),
-                    input_type: it,
-                    delay,
-                });
+                light_connection_registry
+                    .entry(key)
+                    .or_default()
+                    .push(conn);
             }
         }
-
-        None
     }
-}
 
-pub fn build_connections_registry(vmf: &VmfFile,) -> LightConnectionRegistry {
-    let mut light_connection_registry: LightConnectionRegistry = HashMap::new();
-    for ent in vmf.entities.iter() {
-        if let Some(light_connecting) = LightConnection::parse(ent) {
-            let key = ent.id();
-            light_connection_registry
-                .entry(key)
-                .or_default()
-                .push(light_connecting);
-        }
-    }
 
     light_connection_registry
 }
