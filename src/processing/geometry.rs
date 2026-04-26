@@ -1,5 +1,5 @@
 use crate::math::{AABB, Vec3};
-use crate::utils;
+use crate::{GEOMETRY_OFFSET_UNITS, LightCluster, TARGET_MATERIAL, UV_SEARCH_DIST, utils};
 use log::{debug, info, warn};
 use vmf_forge::VmfFile;
 use vmf_forge::prelude::{Entity, Solid};
@@ -167,4 +167,80 @@ pub fn build_collision_world(vmf: &VmfFile) -> Vec<ConvexBrush> {
 
     info!("Built collision world with {} brushes.", brushes.len());
     brushes
+}
+
+/// Offsets solid geometry to prevent z-fighting and copies UVs from parent surfaces
+pub fn apply_offsets_and_uv_fixes(
+    clusters: &[LightCluster],
+    map_name: &str,
+    world_brushes: &[ConvexBrush],
+) {
+    for cluster in clusters {
+        // eg. "maps/sp_a2_triple_laser/surface_0_solid_0"
+        let patch_material_str = format!("maps/{}/{}", map_name, cluster.surface_material);
+
+        for solid_arc in &cluster.solids {
+            let mut solid = solid_arc.write().unwrap();
+            let normal = solid.surface_normal;
+
+            // Calc geometry offset
+            let max_axis = normal.0.abs().max(normal.1.abs()).max(normal.2.abs());
+            let offset = normal * (GEOMETRY_OFFSET_UNITS * max_axis);
+
+            // Raycast for find 'parent' and fix UV
+            // TODO: or parse all solids to find it, OR make it in creating GgxSolid!
+            // BECAUSE for now it's not a very stable and efficient solution.
+            let target_pts = solid.sides.iter()
+                .find(|side| side.material.eq_ignore_ascii_case(TARGET_MATERIAL))
+                .and_then(|side| crate::text::parse_plane_points(&side.plane));
+
+            let start_pos = if let Some(pts) = target_pts {
+                let p0 = pts[0];
+                let k = (p0 - solid.bound.center).dot(normal);
+                let point_on_plane = solid.bound.center + (normal * k);
+
+                point_on_plane
+            } else {
+                solid.bound.center
+            } + (normal * 5.0);
+
+            debug!("  [UV Fix] Casting ray from {:?} dir {:?} (dist: {})", start_pos, normal, UV_SEARCH_DIST);
+
+            let ray_dir = normal * -1.0;
+            let parent_uv = crate::tracer::trace_ray_closest(start_pos, ray_dir, UV_SEARCH_DIST, &world_brushes)
+                .inspect(|hit| debug!("    -> x {:.2} (brush id: {}). Copying UVs.", hit.t, hit.id))
+                .map(|hit| {
+                    (hit.u_axis, hit.v_axis)
+                });
+
+            if parent_uv.is_none() {
+                debug!("    -> No parent surface found within range.");
+            }
+
+            let mut material_updated = false;
+
+            // Modify solid sides
+            for side in &mut solid.sides {
+                side.plane = crate::text::apply_offset_to_plane(&side.plane, offset);
+
+                // update material
+                if side.material.eq_ignore_ascii_case(TARGET_MATERIAL) {
+                    if let Some((u, v)) = parent_uv {
+                        side.u_axis = u.to_string();
+                        side.v_axis = v.to_string();
+                    } else {
+                        warn!("No parent_uv found for cluster: {}", cluster.name);
+                    }
+
+                    side.material = patch_material_str.clone();
+                    material_updated = true;
+                }
+            }
+
+            if !material_updated {
+                // todo: skip and remove cluster?
+                warn!("The cluster {} (ggx_surface: {}) has no {} texture. PBS will be skipped!", cluster.name, cluster.ggx_surface_name, TARGET_MATERIAL);
+            }
+        }
+    }
 }

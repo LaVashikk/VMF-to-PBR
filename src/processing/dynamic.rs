@@ -161,3 +161,30 @@ pub fn build_connections_registry(vmf: &VmfFile,) -> LightConnectionRegistry {
 
     light_connection_registry
 }
+
+pub fn apply_dynamic_controllers(vmf: &mut VmfFile, clusters: &[crate::LightCluster], light_connection_registry: &LightConnectionRegistry) {
+    for cluster in clusters {
+        let controllers = build_dynamic_controllers(
+            &cluster.lights,
+            &cluster.ggx_surface_name,
+            &cluster.pbr_material,
+            &cluster.bound.center.to_origin(),
+            &light_connection_registry
+        );
+
+        // Add 'modify_control_entities'. These entities are responsible for changing
+        // values in c4 register slots, controlling light brightness.
+        vmf.entities.extend(controllers.modify_control_entities);
+
+        // Backpatch connections to existing entities. This integrates the new control
+        // mechanisms by adding output connections to control created 'modify_control'.
+        for (src_id, conns) in controllers.backpatch_connections {
+            vmf.entities.find_by_keyvalue_mut("id", &src_id.to_string()).for_each(|ent| {
+                let Some(connections) = &mut ent.connections else { return };
+                for connect in conns.iter() {
+                    connections.push((connect.0.to_string(), connect.1.clone()));
+                }
+            });
+        }
+    }
+}

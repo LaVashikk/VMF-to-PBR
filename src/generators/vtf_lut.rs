@@ -131,7 +131,7 @@ pub fn generate(cluster: &LightCluster, output_path: &Path, params: &VmtPbrParam
     rgba_pixels[params_row * LUT_WIDTH + 2] = (
         params.fade_start,
         params.fade_end,
-        params.num_lights,
+        num_lights as f32,
         use_cubemap_f32,
     );
 

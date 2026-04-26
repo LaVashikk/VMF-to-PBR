@@ -98,7 +98,7 @@ pub struct LightCluster {
 
 impl LightCluster {
     pub fn dump(&self) {
-        println!("---\nCluster: '{}'", self.name);
+        println!("\nCluster: '{}'", self.name);
         println!("   Coordinated: {}", self.bound.center);
         println!("   PBR Material: {:?}", self.pbr_material);
         println!("   LUT Data Material: {:?}", self.surface_material_path.display());

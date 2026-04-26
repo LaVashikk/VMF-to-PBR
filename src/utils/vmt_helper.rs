@@ -28,9 +28,6 @@ pub struct VmtPbrParams {
     #[serde(rename = "$roughnessbias")]
     pub roughness_bias: f32,
 
-    #[serde(skip)]
-    pub num_lights: f32,
-
     #[serde(rename = "$uv_scale")]
     pub uv_scale: f32,
 
@@ -67,7 +64,6 @@ impl Default for VmtPbrParams {
             reflection_scale: 1.0,
             metalness_scale: 1.0,
             roughness_bias: 1.0,
-            num_lights: 0.0,
             uv_scale: 1.0,
             ao_scale: 1.0,
             global_intensity: 1.0,

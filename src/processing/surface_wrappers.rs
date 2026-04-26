@@ -10,6 +10,7 @@ use derive_more::{Deref, DerefMut};
 use log::{debug, warn};
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::atomic::AtomicU32;
 use std::sync::{Arc, RwLock};
 use vmf_forge::prelude::{Entity, Solid};
 
@@ -31,9 +32,10 @@ pub struct GgxSurfaceEnt {
     pub entity: Entity,
     pub ggx_solids: Vec<Arc<RwLock<GgxSolid>>>,
 
+    pub id: u64,
+    pub name: String,
     pub origin: String,
     pub bounding_box: AABB,
-    pub id: u64,
 
     // ggx_surface custom parms
     pub exclude_lights: HashSet<String>,
@@ -60,9 +62,23 @@ pub struct GgxSolid {
     pub bound: AABB,
 }
 
+static SURFACE_COUNT: AtomicU32 = AtomicU32::new(0);
+
 impl GgxSurfaceEnt {
     pub fn new(mut entity: Entity) -> Self {
         let id = entity.id();
+
+        if entity.targetname().is_none() {
+
+        }
+        let name = entity.targetname()
+            .map(String::from)
+            .unwrap_or_else(|| {
+                let idx = SURFACE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                let new_name = format!("surface_{}", idx);
+                entity.set("targetname".to_string(), new_name.clone());
+                new_name
+            });
 
         // Get surface origin. If not set, use AABB center
         let bounding_box = geometry::get_entity_aabb(&entity).unwrap_or(AABB::new());
@@ -121,6 +137,7 @@ impl GgxSurfaceEnt {
             ggx_solids,
 
             id,
+            name,
             origin,
             bounding_box,
 
@@ -226,7 +243,6 @@ impl LightCluster {
 
             // == Match PCC Volume
             let parallax_volume = cubemaps::find_parallax_volume(bound.center, normal, pcc_volumes);
-
             let cubemap_name = parallax_volume.as_ref().map(|pcc| {
                 format!("maps/{}/c{}_{}_{}.hdr.vtf", map_name, pcc.cubemap_pos[0] as i32, pcc.cubemap_pos[1] as i32, pcc.cubemap_pos[2] as i32)
             });
