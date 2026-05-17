@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use anyhow::Context;
 use serde::Deserialize;
 use source_fs::{FileSystem, PackFile};
+use source_vmt::Vmt;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
@@ -49,7 +50,7 @@ pub struct VmtPbrParams {
     #[serde(rename = "$fadeend")]
     pub fade_end: f32,
 
-    #[serde(rename = "$albetint", deserialize_with = "parse_albedo_tint")]
+    #[serde(rename = "$albedotint", deserialize_with = "parse_albedo_tint")]
     pub albedo_tint: [f32; 4],
 }
 
@@ -78,19 +79,12 @@ impl Default for VmtPbrParams {
 
 impl VmtPbrParams {
     pub fn parse_from_vmt(vmt_data: &str) -> anyhow::Result<Self> {
-        #[derive(Deserialize)]
-        struct ShaderBody {
-            #[serde(rename = "PBR", alias = "pbr")]
-            pbr: Option<VmtPbrParams>,
-        }
+        let vmt = Vmt::from_str(vmt_data).context("Failed to parse VMT structure")?;
+        let Some(pbr_block) = vmt.get_block::<VmtPbrParams>("pbr")? else {
+            return Err(anyhow::anyhow!("Missing PBR block in VMT"));
+        };
 
-        let parsed: HashMap<String, ShaderBody> = source_kv::from_str(vmt_data)
-            .context("Failed to parse VMT structure")?;
-
-        let (_, shader_body) = parsed.into_iter().next()
-            .context("VMT is empty or missing a shader block")?;
-
-        Ok(shader_body.pbr.context("Missing PBR block in VMT")?)
+        Ok(pbr_block)
     }
 
     pub fn find_and_parse<P: PackFile>(fs: &FileSystem<P>, base_material: &str) -> anyhow::Result<VmtPbrParams> {

@@ -17,8 +17,9 @@ simplelog = "0.12.2"
 
 byteorder = "1.5.0"
 derive_more = { version = "2", features = ["deref"] }
-source-fs = "0.1.0"
-source-kv = "0.1.0"
+source-fs = "0.3.0"
+source-kv = "0.4.1"
+source-vmt = "0.4.0"
 
 # [lints.rust]
 # unused = { level = "allow", priority = -1 } # For exploratory dev.

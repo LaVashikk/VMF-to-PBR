@@ -1,45 +1,62 @@
 use std::{fs::File, path::Path};
 use std::io::Write;
+use serde::{Deserialize, Serialize};
+use source_vmt::Vmt;
+
 use crate::vmt_helper::VmtPbrParams;
 
-/// Generates a Patch VMT that includes the base PBR shader and inserts the generated LUT
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+struct ReplaceBlock {
+    #[serde(rename = "$basetexture")]
+    normal_map: String,
+    #[serde(rename = "$texture1")]
+    lut_map: String,
+    #[serde(rename = "$texture2")]
+    cubemap: Option<String>,
+    #[serde(rename = "$texture3")]
+    mrao: String,
+
+    #[serde(rename = "$c4_x")]
+    light_style_x: f32,
+    #[serde(rename = "$c4_y")]
+    light_style_y: f32,
+    #[serde(rename = "$c4_z")]
+    light_style_z: f32,
+    #[serde(rename = "$c4_w")]
+    light_style_w: f32,
+}
+
+// Generates a Patch VMT that includes the base PBR shader and inserts the generated LUT
 pub fn generate(vmt_path: &Path, texture_rel_path: &str, params: &VmtPbrParams, initial_c4: &[f32; 4], cubemap_path: Option<&str>) -> anyhow::Result<()> {
     if let Some(parent) = vmt_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    // TODO: now i have native VMT support, use it!
 
-    let mut file = File::create(vmt_path)?;
-
-    writeln!(file, "patch")?;
-    writeln!(file, "{{")?;
-    writeln!(file, "\tinclude \"materials/{}.vmt\"", params.pbr_shader_template)?; // preprocess materials/vmt path
-    writeln!(file, "\treplace")?;
-    writeln!(file, "\t{{")?;
-
-    // Normalize path separators to forward slashes for Source Engine
     let clean_path = texture_rel_path.replace('\\', "/");
-    writeln!(file, "\t\t$basetexture \"{}\"", params.bump_map)?;
-    writeln!(file, "\t\t$texture1 \"{}\"", clean_path)?;
 
     // Inject Cubemap if available
-    if let Some(env_map) = params.env_map.as_ref() {
-        writeln!(file, "\t\t$texture2 \"{}\"", env_map)?;
+    let cubemap = if let Some(env_map) = params.env_map.as_ref() {
+        Some(env_map.clone())
     } else if let Some(cpath) = cubemap_path {
-        writeln!(file, "\t\t$texture2 \"{}\"", cpath)?;
-    }
+        Some(cpath.to_string())
+    } else { None };
 
-    writeln!(file, "\t\t$texture3 \"{}\"", params.mrao_map)?;
+    let replace_block = ReplaceBlock {
+        normal_map: params.bump_map.clone(),
+        lut_map: clean_path,
+        cubemap,
+        mrao: params.mrao_map.clone(),
+        light_style_x: initial_c4[0],
+        light_style_y: initial_c4[1],
+        light_style_z: initial_c4[2],
+        light_style_w: initial_c4[3],
+    };
 
+    let mut vmt = Vmt::new("patch");
+    vmt.set_string("include", &format!("materials/{}.vmt", params.pbr_shader_template));
+    vmt.set_block("replace", &replace_block)?;
 
-    // Write $c4 vector based on light initial state
-    writeln!(file, "\t\t$c4_x {:.2}", initial_c4[0])?;
-    writeln!(file, "\t\t$c4_y {:.2}", initial_c4[1])?;
-    writeln!(file, "\t\t$c4_z {:.2}", initial_c4[2])?;
-    writeln!(file, "\t\t$c4_w {:.2}", initial_c4[3])?;
-
-    writeln!(file, "\t}}")?;
-    writeln!(file, "}}")?;
+    vmt.to_file(&vmt_path)?;
 
     Ok(())
 }
