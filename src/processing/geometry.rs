@@ -172,12 +172,11 @@ pub fn build_collision_world(vmf: &VmfFile) -> Vec<ConvexBrush> {
 /// Offsets solid geometry to prevent z-fighting and copies UVs from parent surfaces
 pub fn apply_offsets_and_uv_fixes(
     clusters: &[LightCluster],
-    map_name: &str,
     world_brushes: &[ConvexBrush],
 ) {
     for cluster in clusters {
         // eg. "maps/sp_a2_triple_laser/surface_0_solid_0"
-        let patch_material_str = format!("maps/{}/{}", map_name, cluster.surface_material);
+        let patch_material_str = cluster.surface_patch_material.clone();
 
         for solid_arc in &cluster.solids {
             let mut solid = solid_arc.write().unwrap();

@@ -222,6 +222,7 @@ impl LightCluster {
         debug!("Processing ggx_surface {:#?} id: {}", ggx_surface_name, ggx_surface.id);
         let build_cluster = |cluster_name: String, ggx_surface: &GgxSurfaceEnt, solids: Vec<Arc<RwLock<GgxSolid>>>, bound: AABB, normal: Vec3| -> LightCluster {
             let surface_material_path = mat_output_dir.join(&cluster_name);
+let patch_material_str = format!("maps/{}/{}", map_name, cluster_name);
 
             let (selected_lights, rejected_lights) = select_and_score_lights(
                 all_lights,
@@ -264,6 +265,7 @@ impl LightCluster {
                 bound,
                 pbr_material: ggx_surface.template_material.clone(),
                 surface_material: cluster_name,
+                surface_patch_material: patch_material_str,
                 surface_material_path,
                 lights: selected_lights,
                 initial_c4,

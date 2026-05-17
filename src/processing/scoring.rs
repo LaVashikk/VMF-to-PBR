@@ -1,4 +1,4 @@
-use crate::{constants::LUT_WIDTH, types::{LightDef, LightType}};
+use crate::{MAX_LIGHTS, types::{LightDef, LightType}};
 use super::geometry::ConvexBrush;
 use crate::math::{Vec3, AABB};
 use super::tracer;
@@ -59,8 +59,8 @@ pub fn select_and_score_lights(
     let (mut accepted_candidates, mut rejected_candidates): (Vec<_>, Vec<_>) = scored_lights.into_iter()
         .partition(|(_, s)| *s >= f32::MAX || *s >= min_score);
 
-    if accepted_candidates.len() > LUT_WIDTH {
-        let overflow = accepted_candidates.split_off(LUT_WIDTH);
+    if accepted_candidates.len() > MAX_LIGHTS {
+        let overflow = accepted_candidates.split_off(MAX_LIGHTS);
         rejected_candidates.extend(overflow);
     }
 

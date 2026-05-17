@@ -128,6 +128,9 @@ fn main() -> anyhow::Result<()> {
         })
         .collect();
 
+    // todo: Умное объединение по схожести освещения`
+    // todo: Агрессивное объединение с tolerance
+    // todo: zones?
     // optional filtering and skipping of clusters with no lights
     if args.drop_unlit {
         clusters.retain(|c| !c.lights.is_empty());
@@ -159,8 +162,6 @@ fn main() -> anyhow::Result<()> {
                 }
             }
         });
-
-        // dbg!(&orig_vmt);
 
         if let Err(e) = vtf_lut::generate(&cluster, &vtf_path, &orig_vmt) {
             error!("Failed to create VTF for {:?}: {}", cluster.name, e);
@@ -197,7 +198,7 @@ fn main() -> anyhow::Result<()> {
     dynamic::apply_dynamic_controllers(&mut vmf, &clusters, &light_connection_registry);
 
     info!("Applying geometry offsets and fixing UVs...");
-    geometry::apply_offsets_and_uv_fixes(&clusters, &map_name, &world_brushes);
+    geometry::apply_offsets_and_uv_fixes(&clusters, &world_brushes);
 
     // Convert GGX surfaces to real entities
     let pbr_surface_entities: Vec<Entity> = ggx_surfaces.into_iter().map(|s| s.convert_to_illusionary()).collect();

@@ -8,7 +8,9 @@ pub const GEOMETRY_OFFSET_UNITS: f32 = 0.8;
 pub const UV_SEARCH_DIST: f32 = 16.0;
 
 // Width of the LUT (in pixels)
-pub const LUT_WIDTH: usize = 8;
+pub const LUT_WIDTH: usize = 16;
 
 // Height of the LUT (in pixels)
 pub const LUT_HEIGHT: usize = 16;
+
+pub const MAX_LIGHTS: usize = LUT_HEIGHT;

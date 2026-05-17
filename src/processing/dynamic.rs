@@ -167,7 +167,7 @@ pub fn apply_dynamic_controllers(vmf: &mut VmfFile, clusters: &[crate::LightClus
         let controllers = build_dynamic_controllers(
             &cluster.lights,
             &cluster.ggx_surface_name,
-            &cluster.pbr_material,
+            &cluster.surface_patch_material,
             &cluster.bound.center.to_origin(),
             &light_connection_registry
         );

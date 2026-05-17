@@ -85,8 +85,9 @@ pub struct LightCluster {
     // Initial values for register c4, controlling brightness of the first 4 toggleable named lights
     pub initial_c4: [f32; 4],
 
-    pub pbr_material: String,
-    pub surface_material: String,
+    pub pbr_material: String, // why not arc?
+    pub surface_material: String, // todo: only name, not relevant path
+    pub surface_patch_material: String,
     pub surface_material_path: PathBuf,
 
     pub min_cluster_score: f32,
